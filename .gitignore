@@ -1,0 +1,28 @@
+# Virtual environments
+venv/
+Agentic/
+.venv/
+.env
+.vscode/
+.github/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+
+# Pytest cache
+.pytest_cache/
+
+# Runtime outputs
+outputs/
+agent_memory.json
+
