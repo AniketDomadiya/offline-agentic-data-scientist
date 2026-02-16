@@ -1,14 +1,14 @@
-# Key Findings from the Sales Dataset
+# 1. Key Findings from the Sales Dataset
 
-During exploration of the Sales.csv dataset, several non-obvious issues emerged that significantly affect how the system should reason about the problem.
+During exploration of the Sales.csv dataset, the dataset characteristics, statistics, and EDA outputs are printed in the `eda.ipynb` notebook. This document summarizes the key findings and challenges identified for the Sales dataset and highlights aspects that are particularly relevant for designing the agentic system.
 
 ## 1.1 Ground Truth is Not Obvious
 
-One of the first challenges was identifying the ground truth column. Unlike standard ML datasets, this dataset does not explicitly define a target variable.
+One of the first challenges was identifying the ground truth column. This dataset does not explicitly define a target variable.
 
 At first glance, multiple columns could reasonably serve as a prediction target: `customer_rating`, `revenue_usd`, `units_sold`. Each of these represents a meaningful outcome of a transaction. Because of this, the target detection process is not straightforward.
 
-To address this, I implemented a heuristic scoring approach that ranks columns by how likely they are to be targets. Instead of selecting only one hardcoded column, the system stores a ranked list of possible targets with associated confidence scores. So, if modelling with the top-ranked target produces weak or unstable results, the agent can attempt the next most likely candidate and re-evaluate.
+To address this, A heuristic scoring approach is implemented that ranks columns by how likely they are to be targets. Instead of selecting only one hardcoded column, the system stores a ranked list of possible targets with associated confidence scores. So, if modelling with the top-ranked target produces weak or unstable results, the agent can attempt the next most likely candidate and re-evaluate.
 
 This design acknowledges that target detection itself is uncertain, and the system should not assume it is always correct on the first attempt.
 
