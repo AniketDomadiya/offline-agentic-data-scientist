@@ -60,47 +60,72 @@ The final system will not assume a predefined target or fixed workflow. Instead,
 
 ## 3.1 Target Ranking Rather Than Single Selection
 
-Instead of selecting a single ground truth column, the system will:
-1. Score all potential target candidates.
-2. Rank them by confidence.
-3. Attempt modelling with the highest-ranked candidate.
-4. If performance is poor or inconsistent, attempt the next candidate.
+If --target is specified as 'auto' while running the system, then the first challenge is identifying the ground truth..
 
-This allows limited re-planning without human intervention.
+Instead of selecting a single column and committing to it, the system will:
+1. Generate a ranked list of possible target candidates using heuristic scoring (name patterns, distribution properties, uniqueness ratio, etc.).
+2. Attempt modelling using the highest-ranked candidate.
+3. Evaluate performance stability.
+4. If performance is weak, inconsistent, or suspiciously high (possible leakage), the system will try the next candidate in the ranked list.
+This creates a controlled retry mechanism rather than blind repetition.
 
-However, in highly ambiguous datasets, human confirmation may still be necessary. The system will explicitly flag low-confidence target detection cases rather than silently proceeding.
+Retry will be triggered when:
+- Cross-validation variance is very high.
+- Performance is near-random.
+- Performance is unrealistically high (indicating leakage).
+- Target confidence score was low.
+This approach acknowledges uncertainty in target detection and avoids rigid assumptions.
 
----
+## 3.2 Metrics will be chosen conditionally:
+- Balanced classes → Accuracy + F1-score
+- Imbalanced classes → F1-score or weighted F1
+- Very severe imbalance → Consider ROC-AUC
 
-## 3.2 Conditional Problem Type Inference
+## 3.3 Model Selection Strategy
+Instead of trying many models randomly, the system will choose model families based on dataset signals.
 
-Problem type will initially be inferred from the selected target using:
-- Cardinality
-- Datatype
-- Distribution properties
+- If multicollinearity is high → Prefer regularised linear models (Ridge, Lasso)
 
-However, because of the ambiguity observed in `customer_rating`, the system will allow:
-- Trying both regression and classification interpretations (if uncertainty is high)
-- Comparing validation performance
-- Selecting the formulation that behaves more consistently
+- If non-linear patterns suspected → Prefer tree-based models (Random Forest)
 
-This avoids rigid assumptions.
+- If dataset is small → Prefer simpler models to avoid overfitting
 
----
+Initial baseline model will always be trained first for reference. More complex models will only be tried if baseline underperforms.
 
-## 3.3 Data-Aware Preprocessing Decisions
+## 3.4 Data-Aware Preprocessing Decisions
 
 Preprocessing will depend on extracted dataset signals:
 - High skew → apply log transformation
+- Strong outliers → robust scaling
 - Strong multicollinearity → remove redundant features
 - High-cardinality categoricals → alternative encoding
-- Datetime features → extract temporal components
+- Datetime features → extract components (year, month)
 
 These decisions will not be hardcoded to specific column names.
 
----
+## 3.5 Reproducibility
+Deterministic Execution:
+- Fixed random seeds for:
+    - train_test_split
+    - Cross-validation
+    - Models (e.g., RandomForest random_state)
+- Controlled retry depth to avoid non-deterministic loops.
 
-## 3.4 Reflection and Re-Planning
+Logged Configuration State:
+
+- Every experiment attempt will log: Target candidate used, Problem type assumption, Model selected, Preprocessing steps applied, Metric chosen, Random seed used
+
+This ensures the system can reproduce identical results, explain its decisions and be audited.
+
+## 3.6 Reflection and ReAct Mechanism
+
+The system will follow a simplified ReAct-style loop:
+
+1. Observe dataset signals.
+2. Plan preprocessing and model.
+3. Act (train and evaluate).
+4. Reflect on results.
+5. Re-plan if necessary.
 
 After initial training:
 - If performance is unstable across folds → reconsider preprocessing.
@@ -108,7 +133,13 @@ After initial training:
 - If model underperforms baseline → try alternative model family.
 - If target confidence was low → attempt next-ranked target candidate.
 
-Reflection is triggered by measurable signals rather than arbitrary loops.
+Re-planning actions may include:
+- Switching model family.
+- Modifying preprocessing.
+- Trying next-ranked target candidate.
+- Changing evaluation metric.
+
+The system will not loop indefinitely. A maximum retry depth will be enforced to prevent uncontrolled recursion.
 
 # 4. Limitations and Realistic Considerations
 
