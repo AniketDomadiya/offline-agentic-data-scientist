@@ -3,59 +3,54 @@ Planner Agent
 =============
 Generates a context-aware, conditional execution plan for the Agentic Data Scientist.
 
-Always assumes classification (regression path removed entirely).
-
 Design principles
 -----------------
 * A primary scenario is detected first to give the plan a clear narrative.
 * Signal-based tasks are then layered on top of the scenario template.
-* Every task constant is a string so the Orchestrator can check membership
-  with ``if TASK_X in plan`` without magic strings anywhere else.
-* ``create_replan`` is the single source of replan logic — the Reflector
-  calls it rather than containing its own duplicate plan-editing code.
+* Every task constant is a string so the Orchestrator can check membership with ``if TASK_X in plan`` without magic strings anywhere else.
 
 Plan task reference
 -------------------
 Core (always present)
-  profile_dataset           — Confirms schema and extracts all signals.
-  build_preprocessor        — Builds ColumnTransformer pipeline.
-  select_models             — Picks candidate classifiers.
-  train_models              — Trains all candidates.
-  evaluate                  — Picks best; saves confusion matrix.
-  reflect                   — Analyses results; decides whether to replan.
-  write_report              — Saves markdown report and artefacts.
+  profile_dataset           - Confirms schema and extracts all signals.
+  build_preprocessor        - Builds ColumnTransformer pipeline.
+  select_models             - Picks candidate classifiers.
+  train_models              - Trains all candidates.
+  evaluate                  - Picks best; saves confusion matrix.
+  reflect                   - Analyses results; decides whether to replan.
+  write_report              - Saves markdown report and artefacts.
 
-Data preparation (conditional — executed before train/test split)
-  drop_duplicates           — Duplicate rows detected (leakage risk).
-  drop_id_columns           — Identifier columns detected (no signal).
-  drop_severe_missing       — A column is >40 % missing; drop that column.
-  extract_datetime          — Datetime columns → extract year/month features.
-  drop_correlated           — High Pearson pairs (|r|>0.8); drop one per pair.
-  handle_text_features      — Text-like columns (will be excluded, logged).
+Data preparation (conditional - executed before train/test split)
+  drop_duplicates           - Duplicate rows detected (leakage risk).
+  drop_id_columns           - Identifier columns detected (no signal).
+  drop_severe_missing       - A column is >40 % missing; drop that column.
+  extract_datetime          - Datetime columns → extract year/month features.
+  drop_correlated           - High Pearson pairs (|r|>0.8); drop one per pair.
+  handle_text_features      - Text-like columns (will be excluded, logged).
 
 Preprocessing strategy (consumed by build_preprocessor)
-  impute_numeric_mean       — No skewness → mean imputation for numerics.
+  impute_numeric_mean       - No skewness → mean imputation for numerics.
                               Default (no task) = median (safer for skewed data).
-  apply_skew_transform      — ≥1 highly skewed feature → PowerTransformer.
-  handle_high_cardinality   — High-cardinality categoricals → OrdinalEncoder.
-  consider_imbalance        — Ratio 3–10 → class_weight='balanced'.
-  consider_severe_imbalance — Ratio >10 → balanced weights + ensemble-only.
+  apply_skew_transform      - ≥1 highly skewed feature → PowerTransformer.
+  handle_high_cardinality   - High-cardinality categoricals → OrdinalEncoder.
+  consider_imbalance        - Ratio 3–10 → class_weight='balanced'.
+  consider_severe_imbalance - Ratio >10 → balanced weights + ensemble-only.
 
 Training strategy (conditional)
-  use_cross_validation      — Dataset <500 rows → StratifiedKFold.
-  prioritize_model:<name>   — Memory hint → move named model to front.
-  emphasize_ensemble        — Replan after very low F1 → skip LR, push GB/ET.
-  replan_attempt            — Marks this as a revised execution cycle.
+  use_cross_validation      - Dataset <500 rows → StratifiedKFold.
+  prioritize_model:<name>   - Memory hint → move named model to front.
+  emphasize_ensemble        - Replan after very low F1 → skip LR, push GB/ET.
+  replan_attempt            - Marks this as a revised execution cycle.
 
 Scenario tags (informational, embedded in plan after profile_dataset)
-  scenario:tiny             — <200 rows
-  scenario:small            — 200–499 rows
-  scenario:large            — ≥50 000 rows
-  scenario:high_dim         — >100 columns
-  scenario:heavy_missing    — max column missingness >20 %
-  scenario:severe_imb       — imbalance ratio >10
-  scenario:imbalanced       — imbalance ratio 3–10
-  scenario:standard         — none of the above
+  scenario:tiny             - <200 rows
+  scenario:small            - 200–499 rows
+  scenario:large            - ≥50 000 rows
+  scenario:high_dim         - >100 columns
+  scenario:heavy_missing    - max column missingness >20 %
+  scenario:severe_imb       - imbalance ratio >10
+  scenario:imbalanced       - imbalance ratio 3–10
+  scenario:standard         - none of the above
 """
 
 from typing import Any, Dict, List, Optional
@@ -96,7 +91,7 @@ TASK_REPLAN            = "replan_attempt"
 # Scenario prefix (informational)
 _SCENARIO_PREFIX       = "scenario:"
 
-# ── Thresholds ─────────────────────────────────────────────────────────────
+# Thresholds
 _IMBALANCE_MILD    = 3.0    # ratio ≥ → apply balanced class weights
 _IMBALANCE_SEVERE  = 10.0   # ratio ≥ → severe strategy (ensemble-only)
 _MISSING_SEVERE    = 40.0   # column missing % above → drop that column
@@ -110,19 +105,18 @@ _HIGH_DIM_COLS     = 100    # > → scenario:high_dim
 # ═══════════════════════════════════════════════════════════════════════════
 # Internal helpers
 # ═══════════════════════════════════════════════════════════════════════════
-
 def _detect_scenario(dataset_profile: Dict[str, Any]) -> str:
     """
     Return the single most dominant scenario label.
 
     Precedence (highest to lowest):
-      tiny        < 200 rows           — dominates; all strategies limited
-      severe_imb  imbalance > 10       — model selection drastically changes
-      high_dim    cols > 100           — encoding strategy dominates
-      heavy_miss  max missing > 20 %   — imputation focus
-      small       200–499 rows         — cross-validation warranted
-      imbalanced  ratio 3–10           — class weights needed
-      large       ≥ 50 000 rows        — can afford full model suite
+      tiny        < 200 rows           - dominates; all strategies limited
+      severe_imb  imbalance > 10       - model selection drastically changes
+      high_dim    cols > 100           - encoding strategy dominates
+      heavy_miss  max missing > 20 %   - imputation focus
+      small       200–499 rows         - cross-validation warranted
+      imbalanced  ratio 3–10           - class weights needed
+      large       ≥ 50 000 rows        - can afford full model suite
       standard    none of the above
     """
     rows        = dataset_profile["shape"]["rows"]
@@ -402,7 +396,7 @@ def create_replan(
     Generate a revised execution plan after a poor-quality run.
 
     This is the *single source* of replan logic. The Reflector's
-    ``apply_replan_strategy`` calls this function — it does not contain its
+    ``apply_replan_strategy`` calls this function - it does not contain its
     own duplicate plan-editing code.
 
     Strategies applied
@@ -484,25 +478,25 @@ def create_replan(
 # ═══════════════════════════════════════════════════════════════════════════
 
 _TASK_DESCRIPTIONS: Dict[str, str] = {
-    TASK_PROFILE:          "Always first — confirms dataset schema and extracts all signals.",
+    TASK_PROFILE:          "Always first - confirms dataset schema and extracts all signals.",
     TASK_BUILD_PRE:        "Build ColumnTransformer (imputation, scaling, encoding).",
     TASK_SELECT_MODELS:    "Choose candidate classifiers based on size and characteristics.",
     TASK_TRAIN:            "Train all candidate models; compute per-model metrics.",
     TASK_EVALUATE:         "Pick best model; generate confusion matrix and classification report.",
     TASK_REFLECT:          "Analyse results; identify issues; decide whether to replan.",
     TASK_REPORT:           "Write markdown report and persist all artefacts.",
-    TASK_DROP_DUPES:       "Duplicate rows detected — remove before split (leakage prevention).",
-    TASK_DROP_ID:          "Identifier column(s) detected — excluded (no predictive signal).",
-    TASK_DROP_SEVERE_MISS: "Column(s) >40 % missing — dropped (imputation unreliable at this level).",
-    TASK_EXTRACT_DATETIME: "Datetime column(s) — extract year/month features; drop original.",
-    TASK_DROP_CORRELATED:  "Highly correlated pairs (|r|>0.8) — drop one per pair to reduce redundancy.",
-    TASK_HANDLE_TEXT:      "Text-like column(s) — excluded (no text encoder configured).",
-    TASK_IMPUTE_MEAN:      "No skewed features — mean imputation is appropriate for numeric columns.",
-    TASK_SKEW_TRANSFORM:   "Highly skewed numeric feature(s) — PowerTransformer (Yeo-Johnson) applied.",
-    TASK_HIGH_CARD:        "High-cardinality categorical(s) — OrdinalEncoder (prevents feature explosion).",
-    TASK_IMBALANCE:        "Class imbalance ratio 3–10 — class_weight='balanced'; report macro-F1.",
-    TASK_IMBALANCE_SEVERE: "Severe imbalance (ratio >10) — ensemble-only selection; balanced weights.",
-    TASK_CROSS_VAL:        "Small dataset — StratifiedKFold CV for reliable metric estimates.",
+    TASK_DROP_DUPES:       "Duplicate rows detected - remove before split (leakage prevention).",
+    TASK_DROP_ID:          "Identifier column(s) detected - excluded (no predictive signal).",
+    TASK_DROP_SEVERE_MISS: "Column(s) >40 % missing - dropped (imputation unreliable at this level).",
+    TASK_EXTRACT_DATETIME: "Datetime column(s) - extract year/month features; drop original.",
+    TASK_DROP_CORRELATED:  "Highly correlated pairs (|r|>0.8) - drop one per pair to reduce redundancy.",
+    TASK_HANDLE_TEXT:      "Text-like column(s) - excluded (no text encoder configured).",
+    TASK_IMPUTE_MEAN:      "No skewed features - mean imputation is appropriate for numeric columns.",
+    TASK_SKEW_TRANSFORM:   "Highly skewed numeric feature(s) - PowerTransformer (Yeo-Johnson) applied.",
+    TASK_HIGH_CARD:        "High-cardinality categorical(s) - OrdinalEncoder (prevents feature explosion).",
+    TASK_IMBALANCE:        "Class imbalance ratio 3–10 - class_weight='balanced'; report macro-F1.",
+    TASK_IMBALANCE_SEVERE: "Severe imbalance (ratio >10) - ensemble-only selection; balanced weights.",
+    TASK_CROSS_VAL:        "Small dataset - StratifiedKFold CV for reliable metric estimates.",
     TASK_REPLAN:           "Revised execution triggered by poor prior-run performance.",
 }
 
@@ -531,16 +525,16 @@ def explain_plan(plan: List[str], dataset_profile: Dict[str, Any]) -> str:
 
     for task in plan:
         if task.startswith(_SCENARIO_PREFIX):
-            lines.append(f"  {task}: Scenario template applied — see header above.")
+            lines.append(f"  {task}: Scenario template applied - see header above.")
         elif task.startswith("prioritize_model:"):
             model = task.split(":", 1)[1]
             lines.append(
-                f"  {task}: Memory hint — '{model}' worked well on a similar "
+                f"  {task}: Memory hint - '{model}' worked well on a similar "
                 "dataset; evaluated first."
             )
         elif task == "emphasize_ensemble":
             lines.append(
-                "  emphasize_ensemble: Replan — prior F1 very low; "
+                "  emphasize_ensemble: Replan - prior F1 very low; "
                 "LogisticRegression excluded; GB/ET/RF emphasised."
             )
         elif task in _TASK_DESCRIPTIONS:
