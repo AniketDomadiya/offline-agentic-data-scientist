@@ -271,10 +271,11 @@ class AgenticDataScientist:
         if target.strip().lower() == "auto":
             inferred = infer_target_column(df)
             if not inferred:
-                raise ValueError(
+                self.log(
                     "Could not infer target column. "
                     "Please provide --target <column_name>."
                 )
+                return ""
             self.ctx.target = inferred
             self.log(f"Inferred target: '{inferred}'")
 
@@ -317,6 +318,8 @@ class AgenticDataScientist:
             df_prepared, profile = self._apply_data_preparation(
                 df, plan, profile, self.ctx.target
             )
+            # Persist prepared dataframe for subsequent cycles so profile and df stay in sync
+            df = df_prepared
 
             # ── Preprocessor flags from plan ────────────────────────────────
             use_power_transform = TASK_SKEW_TRANSFORM in plan
@@ -465,7 +468,7 @@ class AgenticDataScientist:
             self.log(f"Replanning (attempt #{self.state['replan_count']})...")
             plan, profile = apply_replan_strategy(plan, profile, reflection)
             plan_explanation = explain_plan(plan, profile)
-            self.log(f"Revised plan: {plan}")
+            self.log(f"Revised plan: {plan}\n")
 
-        self.log(f"Done. Outputs: {self.ctx.output_dir}")
+        self.log(f"Done. Outputs: {self.ctx.output_dir}\n")
         return self.ctx.output_dir

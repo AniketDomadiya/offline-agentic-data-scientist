@@ -44,6 +44,7 @@ from sklearn.preprocessing import (
     OrdinalEncoder,
     PowerTransformer,
     StandardScaler,
+    LabelEncoder,
 )
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_validate
 
@@ -329,6 +330,18 @@ def train_models(
     X = df.drop(columns=[target]).copy()
     y = df[target].copy()
 
+    # If target is float dtype, assume discrete classes encoded as floats — label-encode to integers
+    label_encoder = None
+    if pd.api.types.is_float_dtype(y):
+        le = LabelEncoder()
+        y = pd.Series(le.fit_transform(y), index=y.index)
+        label_encoder = le
+        if verbose:
+            print(
+                f"[Modelling] Target '{target}' was float dtype; applied LabelEncoder to convert classes to integers.",
+                flush=True,
+            )
+
     # Drop rows where target is missing
     mask = ~y.isna()
     X, y = X.loc[mask], y.loc[mask]
@@ -397,4 +410,5 @@ def train_models(
         "results":     results,
         "best":        results[0],
         "all_metrics": [r["metrics"] for r in results],
+        "label_encoder": label_encoder,
     }
