@@ -1,5 +1,5 @@
 """
-Agentic Data Scientist — Orchestrator
+Agentic Data Scientist - Orchestrator
 ======================================
 Coordinates the full agentic pipeline for offline classification tasks.
 
@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-# ── Agent components ────────────────────────────────────────────────────────
+# Agent components
 from agents.planner import (
     create_plan,
     explain_plan,
@@ -44,14 +44,13 @@ from agents.planner import (
 from agents.reflector import reflect, should_replan, apply_replan_strategy
 from agents.memory    import JSONMemory
 
-# ── Tools ───────────────────────────────────────────────────────────────────
+# Tools
 from tools.data_profiler import profile_dataset, infer_target_column, dataset_fingerprint
 from tools.modelling     import build_preprocessor, select_models, train_models
 from tools.evaluation    import evaluate_best, write_markdown_report, save_json
 
 
-# ── Run context ─────────────────────────────────────────────────────────────
-
+# Run context
 @dataclass
 class RunContext:
     run_id:      str
@@ -63,10 +62,8 @@ class RunContext:
     test_size:   float
     max_replans: int
 
-
 def _now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-
 
 def _size_bucket(rows: int) -> str:
     if rows < 500:    return "tiny"
@@ -74,11 +71,7 @@ def _size_bucket(rows: int) -> str:
     if rows < 50_000: return "medium"
     return "large"
 
-
-# ═══════════════════════════════════════════════════════════════════════════
 # Orchestrator
-# ═══════════════════════════════════════════════════════════════════════════
-
 class AgenticDataScientist:
     """
     Offline Agentic Data Scientist (classification-focused).
@@ -109,7 +102,7 @@ class AgenticDataScientist:
         if self.verbose:
             print(f"[AgenticDataScientist] {msg}", flush=True)
 
-    # ── Data loading ────────────────────────────────────────────────────────
+    # Data loading
 
     def load_data(self, path: str) -> pd.DataFrame:
         self.log(f"Loading dataset: {path}")
@@ -117,7 +110,7 @@ class AgenticDataScientist:
         self.log(f"Loaded {df.shape[0]} rows × {df.shape[1]} cols")
         return df
 
-    # ── Data preparation ────────────────────────────────────────────────────
+    # Data preparation
 
     def _apply_data_preparation(
         self,
@@ -135,11 +128,11 @@ class AgenticDataScientist:
         Mutations (in order)
         --------------------
         1. Drop rows with null target (always).
-        2. drop_duplicates — remove duplicate rows (leakage prevention).
-        3. drop_id_columns — explicitly drop detected identifier columns.
-        4. extract_datetime — extract year/month; drop original datetime col.
-        5. drop_severe_missing — drop columns with >40 % missing values.
-        6. drop_correlated — from each high-correlation pair, drop second col.
+        2. drop_duplicates - remove duplicate rows (leakage prevention).
+        3. drop_id_columns - explicitly drop detected identifier columns.
+        4. extract_datetime - extract year/month; drop original datetime col.
+        5. drop_severe_missing - drop columns with >40 % missing values.
+        6. drop_correlated - from each high-correlation pair, drop second col.
         """
         df         = df.copy()
         profile    = dict(profile)
@@ -237,8 +230,7 @@ class AgenticDataScientist:
 
         return df.reset_index(drop=True), profile
 
-    # ── Main run ────────────────────────────────────────────────────────────
-
+    # Main run
     def run(
         self,
         data_path:   str,
@@ -265,7 +257,7 @@ class AgenticDataScientist:
         )
         self.state = {"replan_count": 0, "prior_f1": None}
 
-        # ── Load ────────────────────────────────────────────────────────────
+        # Load
         df = self.load_data(data_path)
 
         if target.strip().lower() == "auto":
@@ -279,7 +271,7 @@ class AgenticDataScientist:
             self.ctx.target = inferred
             self.log(f"Inferred target: '{inferred}'")
 
-        # ── Profile ─────────────────────────────────────────────────────────
+        # Profile
         profile = profile_dataset(df, self.ctx.target)
         fp      = dataset_fingerprint(df, self.ctx.target)
         self.log(
@@ -290,7 +282,7 @@ class AgenticDataScientist:
         for note in profile.get("notes", []):
             self.log(f"  NOTE: {note}")
 
-        # ── Memory lookup ────────────────────────────────────────────────────
+        # Memory lookup
         memory_hint = self.memory.get_hint(fp, profile)
         if memory_hint:
             self.log(
@@ -299,29 +291,27 @@ class AgenticDataScientist:
                 f"(sim={memory_hint.get('similarity_score', 1.0):.2f})"
             )
         else:
-            self.log("No memory hint — planning from scratch.")
+            self.log("No memory hint - planning from scratch.")
 
-        # ── Initial plan ─────────────────────────────────────────────────────
+        # Initial plan
         plan = create_plan(profile, memory_hint=memory_hint)
         plan_explanation = explain_plan(plan, profile)
         self.log(f"Plan ({len(plan)} tasks): {plan}")
         self.log(f"\n{plan_explanation}\n")
 
-        # ═══════════════════════════════════════════════════════════════════
         # Execution loop
-        # ═══════════════════════════════════════════════════════════════════
         while True:
             cycle = self.state["replan_count"] + 1
             self.log(f"--- Execution cycle {cycle} ---")
 
-            # ── Data preparation ────────────────────────────────────────────
+            # Data preparation
             df_prepared, profile = self._apply_data_preparation(
                 df, plan, profile, self.ctx.target
             )
             # Persist prepared dataframe for subsequent cycles so profile and df stay in sync
             df = df_prepared
 
-            # ── Preprocessor flags from plan ────────────────────────────────
+            # Preprocessor flags from plan
             use_power_transform = TASK_SKEW_TRANSFORM in plan
             handle_high_card    = TASK_HIGH_CARD      in plan
             impute_strategy     = "mean" if TASK_IMPUTE_MEAN in plan else "median"
@@ -339,11 +329,11 @@ class AgenticDataScientist:
                 impute_strategy=impute_strategy,
             )
 
-            # ── Model selection ──────────────────────────────────────────────
+            # Model selection
             candidates = select_models(profile, seed=self.ctx.seed, plan=plan)
             self.log(f"Candidates: {[n for n, _ in candidates]}")
 
-            # ── Training ─────────────────────────────────────────────────────
+            # Training
             cv_folds = 5 if TASK_CROSS_VAL in plan else 0
             if cv_folds:
                 self.log(f"Using {cv_folds}-fold StratifiedKFold CV.")
@@ -360,7 +350,7 @@ class AgenticDataScientist:
                 cross_validate_folds=cv_folds,
             )
 
-            # ── Evaluation ───────────────────────────────────────────────────
+            # Evaluation
             eval_payload = evaluate_best(results, output_dir=self.ctx.output_dir)
             best_m = eval_payload["best_metrics"]
             self.log(
@@ -369,7 +359,7 @@ class AgenticDataScientist:
                 f"f1_macro={best_m['f1_macro']:.3f}"
             )
 
-            # ── Reflection ───────────────────────────────────────────────────
+            # Reflection
             reflection = reflect(
                 dataset_profile           = profile,
                 evaluation                = eval_payload["best_metrics"],
@@ -393,7 +383,7 @@ class AgenticDataScientist:
             for note in reflection.get("memory_notes", []):
                 self.log(f"  MEM:   {note}")
 
-            # ── Save artefacts ───────────────────────────────────────────────
+            # Save artefacts
             save_json(os.path.join(self.ctx.output_dir, "eda_summary.json"), profile)
             save_json(os.path.join(self.ctx.output_dir, "plan.json"),        {"plan": plan})
             save_json(os.path.join(self.ctx.output_dir, "metrics.json"),     eval_payload)
@@ -414,7 +404,7 @@ class AgenticDataScientist:
                 memory_hint      = memory_hint,
             )
 
-            # ── Update memory ────────────────────────────────────────────────
+            # Update memory
             ftype = profile.get("feature_types", {})
             self.memory.upsert_dataset_record(fp, {
                 "last_seen":         _now_iso(),
@@ -433,7 +423,7 @@ class AgenticDataScientist:
                 "notes":             profile.get("notes", []),
             })
 
-            # ── Meta-learning: record outcome ────────────────────────────────
+            # Meta-learning: record outcome
             current_f1 = float(best_m["f1_macro"])
             if self.state["prior_f1"] is not None:
                 self.memory.store_reflection_outcome(
@@ -453,7 +443,7 @@ class AgenticDataScientist:
             self.state["prior_f1"] = current_f1
             self.log(f"Memory updated (fp={fp}).")
 
-            # ── Replan decision ──────────────────────────────────────────────
+            # Replan decision
             if not should_replan(reflection):
                 self.log("No replan. Finishing.")
                 break

@@ -24,8 +24,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, classification_report
 
 
-# ── Serialisation helpers ──────────────────────────────────────────────────
-
+# Serialisation helpers
 def _json_safe(obj: Any) -> Any:
     """
     Fallback JSON serialiser for non-standard types.
@@ -48,11 +47,9 @@ def _json_safe(obj: Any) -> Any:
             return str(obj)
     return str(obj)
 
-
 def save_json(path: str, obj: Any) -> None:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2, ensure_ascii=False, default=_json_safe)
-
 
 def metrics_for_saving(eval_payload: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -67,8 +64,7 @@ def metrics_for_saving(eval_payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# ── Confusion matrix plot ──────────────────────────────────────────────────
-
+# Confusion matrix plot
 def plot_confusion_matrix(
     cm: np.ndarray,
     labels: List[str],
@@ -104,9 +100,7 @@ def plot_confusion_matrix(
     plt.savefig(out_path, dpi=160, bbox_inches="tight")
     plt.close()
 
-
-# ── Main evaluation ────────────────────────────────────────────────────────
-
+# Main evaluation
 def evaluate_best(
     training_payload: Dict[str, Any],
     output_dir: str,
@@ -117,12 +111,12 @@ def evaluate_best(
     Returns
     -------
     dict with keys:
-      best_metrics            — accuracy, balanced_accuracy, f1_macro, etc.
-      all_metrics             — list of metrics dicts for all models
-      confusion_matrix_path   — path to PNG
-      confusion_matrix_array  — raw numpy ndarray (in-memory only; not saved to JSON)
-      confusion_matrix_labels — class label strings aligned with CM rows/cols
-      classification_report   — sklearn classification_report string
+      best_metrics            - accuracy, balanced_accuracy, f1_macro, etc.
+      all_metrics             - list of metrics dicts for all models
+      confusion_matrix_path   - path to PNG
+      confusion_matrix_array  - raw numpy ndarray (in-memory only; not saved to JSON)
+      confusion_matrix_labels - class label strings aligned with CM rows/cols
+      classification_report   - sklearn classification_report string
     """
     best        = training_payload["best"]
     all_metrics = training_payload["all_metrics"]
@@ -133,7 +127,7 @@ def evaluate_best(
     labels  = sorted([str(x) for x in y_test.dropna().unique().tolist()])
     cm      = confusion_matrix(y_test, y_pred, labels=labels)
     cm_path = os.path.join(output_dir, "confusion_matrix.png")
-    plot_confusion_matrix(cm, labels, cm_path, f"Confusion Matrix — {best['name']}")
+    plot_confusion_matrix(cm, labels, cm_path, f"Confusion Matrix - {best['name']}")
 
     cls_report = classification_report(y_test, y_pred, zero_division=0)
 
@@ -141,14 +135,13 @@ def evaluate_best(
         "best_metrics":            best["metrics"],
         "all_metrics":             all_metrics,
         "confusion_matrix_path":   cm_path,
-        "confusion_matrix_array":  cm,       # numpy ndarray — in-memory only
+        "confusion_matrix_array":  cm,       # numpy ndarray - in-memory only
         "confusion_matrix_labels": labels,
         "classification_report":   cls_report,
     }
 
 
-# ── Markdown report ────────────────────────────────────────────────────────
-
+# Markdown report
 def write_markdown_report(
     out_path: str,
     ctx: Any,
@@ -181,13 +174,13 @@ def write_markdown_report(
 
     if memory_hint:
         mt  = memory_hint.get("match_type", "unknown")
-        sim = memory_hint.get("similarity_score", "—")
+        sim = memory_hint.get("similarity_score", "-")
         sim_str = f"{sim:.2f}" if isinstance(sim, float) else str(sim)
         memory_md = (
             f"- Match type: **{mt}** (similarity={sim_str})\n"
-            f"- Prior best model: `{memory_hint.get('best_model', '—')}`\n"
+            f"- Prior best model: `{memory_hint.get('best_model', '-')}`\n"
             f"- Prior balanced-accuracy: "
-            f"{memory_hint.get('best_metrics', {}).get('balanced_accuracy', '—')}"
+            f"{memory_hint.get('best_metrics', {}).get('balanced_accuracy', '-')}"
         )
     else:
         memory_md = "- No prior knowledge available for this dataset."
@@ -205,7 +198,7 @@ def write_markdown_report(
     overfit_str = reflection.get("overfit_underfitting_diagnosis", "")
     pr_note     = reflection.get("precision_recall_note", "")
 
-    md = f"""# Agentic Data Scientist — Run Report
+    md = f"""# Agentic Data Scientist - Run Report
 
 **Run ID:** `{ctx.run_id}`  
 **Started (UTC):** {ctx.started_at}  

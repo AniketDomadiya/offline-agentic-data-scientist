@@ -1,80 +1,48 @@
 """
 Reflector Agent
 ===============
-Analyses execution results, diagnoses problems, generates prioritised
-actionable suggestions, and decides whether to trigger replanning.
+Analyses execution results, diagnoses problems, generates prioritised actionable suggestions, and decides whether to trigger replanning.
 
 What this module covers
 -----------------------
-1.  Dummy baseline + effect size (Cohen's h) + 95 % confidence interval
-    Replaces the "TODO: confidence intervals, effect sizes" comment.
-    Uses Wilson interval (more accurate than normal approximation for
-    proportions near 0 or 1).
-
+1.  Dummy baseline + effect size (Cohen's h) + 95 % confidence interval.
+    Uses Wilson interval (more accurate than normal approximation for proportions near 0 or 1).
 2.  Absolute performance bands (weak / moderate thresholds).
-
 3.  Suspiciously high performance (leakage detection).
-
 4.  Imbalance bias  (accuracy >> balanced accuracy divergence).
-
 5.  Per-class analysis: flag low-F1 classes and large F1 spread.
-
 6.  Precision-recall tradeoff: flag conservative (high-P, low-R) or
     liberal (low-P, high-R) bias, with threshold-tuning advice.
-
 7.  Overfitting / underfitting detection:
     - Uses cv_balanced_accuracy vs test balanced_accuracy when CV ran.
     - Overfitting: CV ba >> test ba by > 0.10 gap.
     - Underfitting: both CV and test ba are low (< 0.60).
     - Without CV: heuristic based on absolute performance level.
-
 8.  Confusion matrix pattern analysis:
     - Which class-pair is most confused.
     - Any class with zero correct predictions (fully misclassified).
     - Whether the matrix is dominated by off-diagonal entries.
     Requires the raw CM ndarray passed in from evaluation.py.
-
 9.  Model diversity: std of balanced-accuracy across non-dummy models.
-
 10. Root cause diagnosis: synthesises all signals into a single
     structured cause label (majority_class_bias / weak_feature_signal /
     class_confusion / overfitting / underfitting / insufficient_data /
     data_quality / ok).
-
 11. Data quality issue detection from profile signals (missing, skewness,
     correlations, duplicates still present).
-
 12. Suggestion prioritisation by expected impact score (high / medium / low).
-
 13. Meta-learning from past reflections:
     - Looks up which suggestion categories were tried before on this
       fingerprint (via JSONMemory) and whether they helped.
     - Downweights stale suggestions with a 0 % success rate.
     - Adds a memory note when a suggestion has previously failed.
-
 14. Sophisticated ``should_replan`` policy:
     - Diminishing returns detection (F1 improvement < 0.02 after prior replan).
     - Memory check for failed strategies (don't repeat what didn't work).
     - Leakage suspicion blocks replan (it's a different class of problem).
     - Adaptive F1/BA thresholds adjusted for problem difficulty (n_classes).
-
 15. ``apply_replan_strategy``: delegates plan to ``create_replan`` in
     planner.py (no duplicate logic); annotates profile with structured notes.
-
-What is NOT implemented and why
----------------------------------
-McNemar / Wilcoxon tests
-    Require raw per-sample paired predictions or per-fold scores. The
-    reflect() interface only receives aggregate metrics. Cohen's h effect
-    size and Wilson CI give equivalent practical information from aggregates.
-
-True learning curves
-    Require training at multiple dataset sizes (too slow for this pipeline).
-    Overfitting / underfitting is detected via CV vs test gap instead.
-
-Feature importance analysis
-    Feature importances are model-specific and not currently passed through.
-    Root cause diagnosis covers the cases that feature importance would detect.
 """
 
 import math
@@ -87,10 +55,7 @@ from agents.planner import create_replan
 from agents.memory  import JSONMemory, _categorise_suggestions
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Thresholds  (all in one place for easy tuning)
-# ═══════════════════════════════════════════════════════════════════════════
-
 _MIN_IMPROVEMENT     = 0.05   # min balanced-acc gain over dummy to be "meaningful"
 _F1_WEAK             = 0.60   # below → poor performance
 _F1_MODERATE         = 0.75   # below → moderate performance
@@ -104,12 +69,9 @@ _DIMINISHING_DELTA   = 0.02   # F1 improvement below this → diminishing return
 _CI_Z                = 1.96   # z-score for 95 % confidence interval
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Helper functions  (all private, prefixed with _)
-# ═══════════════════════════════════════════════════════════════════════════
+# Helper functions
 
-# ── 1. Effect size and confidence interval ──────────────────────────────────
-
+# 1. Effect size and confidence interval 
 def _compute_effect_size_and_ci(
     bal_acc: float,
     dummy_ba: float,
@@ -164,8 +126,7 @@ def _compute_effect_size_and_ci(
     }
 
 
-# ── 2. Classification report parser ─────────────────────────────────────────
-
+# 2. Classification report parser
 def _parse_classification_report(report_str: str) -> Dict[str, Dict[str, float]]:
     """
     Parse sklearn's classification_report string into per-class metric dicts.
@@ -203,9 +164,7 @@ def _parse_classification_report(report_str: str) -> Dict[str, Dict[str, float]]
         }
     return class_metrics
 
-
-# ── 3. Per-class performance analysis ───────────────────────────────────────
-
+# 3. Per-class performance analysis 
 def _analyse_per_class(
     class_metrics: Dict[str, Dict[str, float]],
     n_classes: int,
@@ -263,8 +222,7 @@ def _analyse_per_class(
     return issues, suggestions
 
 
-# ── 4. Precision-recall tradeoff ─────────────────────────────────────────────
-
+# 4. Precision-recall tradeoff
 def _analyse_precision_recall_tradeoff(
     evaluation: Dict[str, Any],
 ) -> Tuple[str, List[Tuple[str, float]]]:
@@ -317,8 +275,7 @@ def _analyse_precision_recall_tradeoff(
     return note, suggestions
 
 
-# ── 5. Overfitting / underfitting detection ──────────────────────────────────
-
+# 5. Overfitting / underfitting detection
 def _detect_overfitting_underfitting(
     all_metrics: List[Dict[str, Any]],
     bal_acc: float,
@@ -371,7 +328,7 @@ def _detect_overfitting_underfitting(
                 0.75,
             ))
     else:
-        # No CV available — heuristic
+        # No CV available - heuristic
         if bal_acc < _F1_WEAK and f1_macro < _F1_WEAK:
             diagnosis = "underfitting"
             suggestions.append((
@@ -383,8 +340,7 @@ def _detect_overfitting_underfitting(
     return diagnosis, suggestions
 
 
-# ── 6. Confusion matrix pattern analysis ────────────────────────────────────
-
+# 6. Confusion matrix pattern analysis
 def _analyse_confusion_matrix(
     cm: Optional[np.ndarray],
     labels: List[str],
@@ -405,7 +361,7 @@ def _analyse_confusion_matrix(
 
     Returns
     -------
-    (issues, suggestions) — each item is a (text, impact_score) tuple.
+    (issues, suggestions) - each item is a (text, impact_score) tuple.
     """
     issues:      List[Tuple[str, float]] = []
     suggestions: List[Tuple[str, float]] = []
@@ -417,7 +373,7 @@ def _analyse_confusion_matrix(
     n_correct = int(np.trace(cm))
     error_rate = 1.0 - (n_correct / max(n_total, 1))
 
-    # ── 1. Most confused class pair ─────────────────────────────────────────
+    # 1. Most confused class pair
     cm_off = cm.astype(float).copy()
     np.fill_diagonal(cm_off, 0)
     max_idx = np.unravel_index(np.argmax(cm_off), cm_off.shape)
@@ -437,7 +393,7 @@ def _analyse_confusion_matrix(
             0.65,
         ))
 
-    # ── 2. Fully misclassified class (zero on diagonal) ─────────────────────
+    # 2. Fully misclassified class (zero on diagonal)
     zero_classes = [
         labels[i]
         for i in range(min(cm.shape[0], len(labels)))
@@ -456,7 +412,7 @@ def _analyse_confusion_matrix(
             0.90,
         ))
 
-    # ── 3. High overall error rate ───────────────────────────────────────────
+    # 3. High overall error rate
     if error_rate > 0.50:
         issues.append((
             f"Overall confusion matrix error rate is {error_rate:.1%}: "
@@ -467,8 +423,7 @@ def _analyse_confusion_matrix(
     return issues, suggestions
 
 
-# ── 7. Model diversity ──────────────────────────────────────────────────────
-
+# 7. Model diversity
 def _analyse_model_diversity(
     all_metrics: List[Dict[str, Any]],
 ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]], float]:
@@ -504,8 +459,7 @@ def _analyse_model_diversity(
     return issues, suggestions, spread
 
 
-# ── 8. Data quality issue detection ─────────────────────────────────────────
-
+# 8. Data quality issue detection
 def _detect_data_quality_issues(
     dataset_profile: Dict[str, Any],
     plan: Optional[List[str]] = None,
@@ -567,8 +521,7 @@ def _detect_data_quality_issues(
     return suggestions
 
 
-# ── 9. Root cause diagnosis ──────────────────────────────────────────────────
-
+# 9. Root cause diagnosis
 def _diagnose_root_cause(
     bal_acc: float,
     f1_macro: float,
@@ -586,15 +539,15 @@ def _diagnose_root_cause(
 
     Precedence
     ----------
-    1. majority_class_bias — imbalance + accuracy >> balanced_accuracy
-    2. overfitting         — CV >> test gap
-    3. underfitting        — both CV and test are low
-    4. zero_class          — at least one class never predicted correctly
-    5. weak_feature_signal — improvement over dummy < 0.05
-    6. data_quality        — all models converge (std < 0.03)
-    7. insufficient_data   — small dataset + poor performance
-    8. class_confusion     — multi-class + per-class spread > 0.30
-    9. ok                  — none of the above
+    1. majority_class_bias - imbalance + accuracy >> balanced_accuracy
+    2. overfitting         - CV >> test gap
+    3. underfitting        - both CV and test are low
+    4. zero_class          - at least one class never predicted correctly
+    5. weak_feature_signal - improvement over dummy < 0.05
+    6. data_quality        - all models converge (std < 0.03)
+    7. insufficient_data   - small dataset + poor performance
+    8. class_confusion     - multi-class + per-class spread > 0.30
+    9. ok                  - none of the above
 
     This label is stored in the reflection dict and in the markdown report
     so the agent's diagnosis is auditable.
@@ -618,8 +571,7 @@ def _diagnose_root_cause(
     return "ok"
 
 
-# ── 10. Suggestion prioritisation ───────────────────────────────────────────
-
+# 10. Suggestion prioritisation
 def _prioritize_suggestions(
     raw_suggestions: List[Tuple[str, float]],
 ) -> List[str]:
@@ -636,9 +588,7 @@ def _prioritize_suggestions(
     sorted_sug = sorted(raw_suggestions, key=lambda x: x[1], reverse=True)
     return [text for text, _ in sorted_sug]
 
-
-# ── 11. Meta-learning: learn from past reflections ──────────────────────────
-
+# 11. Meta-learning: learn from past reflections
 def _learn_from_memory(
     memory: Optional[JSONMemory],
     fingerprint: str,
@@ -673,7 +623,7 @@ def _learn_from_memory(
         # Categorise this suggestion
         cats = _categorise_suggestions([text])
         if any(c in failed_cats for c in cats):
-            # Reduce impact score — still show suggestion but ranked lower
+            # Reduce impact score - still show suggestion but ranked lower
             adjusted.append((text, score * 0.40))
             cats_str = ", ".join(c for c in cats if c in failed_cats)
             memory_notes.append(
@@ -687,8 +637,7 @@ def _learn_from_memory(
     return adjusted, memory_notes
 
 
-# ── 12. Diminishing returns check ───────────────────────────────────────────
-
+# 12. Diminishing returns check
 def _check_diminishing_returns(
     memory: Optional[JSONMemory],
     fingerprint: str,
@@ -715,10 +664,6 @@ def _check_diminishing_returns(
     improvement = current_f1 - prior_f1
     return improvement < _DIMINISHING_DELTA
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Public API
-# ═══════════════════════════════════════════════════════════════════════════
 
 def reflect(
     dataset_profile: Dict[str, Any],
@@ -772,7 +717,7 @@ def reflect(
     raw_issues:      List[Tuple[str, float]] = []
     raw_suggestions: List[Tuple[str, float]] = []
 
-    # ── 1. Dummy baseline + effect size + confidence interval ────────────────
+    # 1. Dummy baseline + effect size + confidence interval
     dummy = next((m for m in all_metrics if "Dummy" in m.get("model", "")), None)
     improvement_over_dummy: Optional[float] = None
     effect_info: Dict[str, Any] = {}
@@ -813,7 +758,7 @@ def reflect(
         per_class_metrics = _parse_classification_report(classification_report_str)
         n_test = max(int(rows * 0.2), 10)
 
-    # ── 2. Absolute performance bands ───────────────────────────────────────
+    # 2. Absolute performance bands
     if f1_macro < _F1_WEAK:
         raw_issues.append((
             f"Macro F1={f1_macro:.3f} is below the weak threshold ({_F1_WEAK}). "
@@ -839,7 +784,7 @@ def reflect(
             0.80,
         ))
 
-    # ── 3. Leakage suspicion ─────────────────────────────────────────────────
+    # 3. Leakage suspicion
     if bal_acc >= _LEAKAGE_BA:
         raw_issues.append((
             f"Balanced accuracy={bal_acc:.3f} ≥ {_LEAKAGE_BA}: suspiciously high. "
@@ -852,7 +797,7 @@ def reflect(
             0.95,
         ))
 
-    # ── 4. Imbalance bias ────────────────────────────────────────────────────
+    # 4. Imbalance bias
     if imb >= 3.0:
         if accuracy > bal_acc + 0.10:
             raw_issues.append((
@@ -866,22 +811,22 @@ def reflect(
             0.70,
         ))
 
-    # ── 5. Per-class analysis ────────────────────────────────────────────────
+    # 5. Per-class analysis
     cls_issues, cls_suggestions = _analyse_per_class(per_class_metrics, n_classes)
     raw_issues.extend(cls_issues)
     raw_suggestions.extend(cls_suggestions)
 
-    # ── 6. Precision-recall tradeoff ─────────────────────────────────────────
+    # 6. Precision-recall tradeoff
     pr_note, pr_suggestions = _analyse_precision_recall_tradeoff(evaluation)
     raw_suggestions.extend(pr_suggestions)
 
-    # ── 7. Overfitting / underfitting ────────────────────────────────────────
+    # 7. Overfitting / underfitting
     overfit_diagnosis, overfit_suggestions = _detect_overfitting_underfitting(
         all_metrics, bal_acc, f1_macro
     )
     raw_suggestions.extend(overfit_suggestions)
 
-    # ── 8. Confusion matrix patterns ─────────────────────────────────────────
+    # 8. Confusion matrix patterns
     cm_issues, cm_suggestions = _analyse_confusion_matrix(
         confusion_matrix,
         confusion_matrix_labels or [],
@@ -894,16 +839,16 @@ def reflect(
         "ZERO correct" in text for text, _ in cm_issues
     )
 
-    # ── 9. Model diversity ────────────────────────────────────────────────────
+    # 9. Model diversity
     div_issues, div_suggestions, model_spread = _analyse_model_diversity(all_metrics)
     raw_issues.extend(div_issues)
     raw_suggestions.extend(div_suggestions)
 
-    # ── 10. Data quality issues from profile ─────────────────────────────────
+    # 10. Data quality issues from profile
     dq_suggestions = _detect_data_quality_issues(dataset_profile, plan)
     raw_suggestions.extend(dq_suggestions)
 
-    # ── 11. Small-dataset reliability ────────────────────────────────────────
+    # 11. Small-dataset reliability
     if rows < 500 and f1_macro < _F1_MODERATE:
         raw_suggestions.append((
             f"Small dataset ({rows} rows): single train-test split metrics may be "
@@ -911,7 +856,7 @@ def reflect(
             0.60,
         ))
 
-    # ── 12. Top-2 model tie ───────────────────────────────────────────────────
+    # 12. Top-2 model tie
     ranked = sorted(
         all_metrics,
         key=lambda m: float(m.get("balanced_accuracy", 0)),
@@ -926,7 +871,7 @@ def reflect(
                 0.40,
             ))
 
-    # ── 13. Root cause diagnosis ──────────────────────────────────────────────
+    # 13. Root cause diagnosis
     root_cause = _diagnose_root_cause(
         bal_acc=bal_acc,
         f1_macro=f1_macro,
@@ -940,21 +885,21 @@ def reflect(
         rows=rows,
     )
 
-    # ── 14. Meta-learning from memory ────────────────────────────────────────
+    # 14. Meta-learning from memory
     raw_suggestions, memory_notes = _learn_from_memory(
         memory, fingerprint, raw_suggestions
     )
 
-    # ── 15. Prioritise suggestions ────────────────────────────────────────────
+    # 15. Prioritise suggestions
     issues_text     = _prioritize_suggestions(raw_issues)
     suggestions_text = _prioritize_suggestions(raw_suggestions)
 
-    # ── 16. Diminishing returns check ────────────────────────────────────────
+    # 16. Diminishing returns check
     diminishing_returns = _check_diminishing_returns(
         memory, fingerprint, replan_count, f1_macro
     )
 
-    # ── 17. Replan decision (sophisticated) ──────────────────────────────────
+    # 17. Replan decision (sophisticated)
     # Adaptive F1 threshold: harder problems (many classes) get a lower bar
     adaptive_f1_threshold  = max(0.55, _F1_MODERATE - 0.03 * max(0, n_classes - 2))
     adaptive_ba_threshold  = max(0.55, _BA_MODERATE - 0.02 * max(0, n_classes - 2))
@@ -1008,7 +953,7 @@ def should_replan(reflection: Dict[str, Any]) -> bool:
          thresholds adjusted for problem difficulty).
       2. At least one concrete issue was identified.
       3. Diminishing returns NOT detected (prior replan already tried and
-         F1 improvement was negligible — no point trying again).
+         F1 improvement was negligible - no point trying again).
       4. Not a leakage situation (near-perfect balanced accuracy is a
          different class of problem that replanning won't fix).
 
@@ -1036,7 +981,7 @@ def apply_replan_strategy(
     Plan
     ----
     Delegates entirely to ``create_replan`` in ``agents.planner``.
-    There is NO duplicate plan-editing logic here — the Planner owns all
+    There is NO duplicate plan-editing logic here - the Planner owns all
     plan construction and revision logic.
 
     Profile annotations
@@ -1047,9 +992,9 @@ def apply_replan_strategy(
 
     Strategy labels (stored in notes for auditability)
     --------------------------------------------------
-    conservative  — only the single highest-impact change
-    standard      — standard replan (imbalance + ensemble if needed)
-    aggressive    — all possible improvements at once (low F1 + many issues)
+    conservative  - only the single highest-impact change
+    standard      - standard replan (imbalance + ensemble if needed)
+    aggressive    - all possible improvements at once (low F1 + many issues)
 
     The actual strategy implementation is in ``create_replan``; the label
     here is descriptive metadata.
@@ -1084,7 +1029,7 @@ def apply_replan_strategy(
         "majority_class_bias":  "Replan: imbalance strategy injected or strengthened.",
         "overfitting":          "Replan: model complexity will be reduced (fewer estimators).",
         "underfitting":         "Replan: switching to more expressive ensemble models.",
-        "weak_feature_signal":  "Replan: model convergence — investigating data quality.",
+        "weak_feature_signal":  "Replan: model convergence - investigating data quality.",
         "data_quality":         "Replan: correlated-feature drop added to break ceiling.",
         "class_confusion":      "Replan: ensemble emphasis to better separate confused classes.",
         "zero_class":           "Replan: class_weight='balanced' enforced for zero-recall class.",

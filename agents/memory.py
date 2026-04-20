@@ -3,8 +3,7 @@ Memory System
 =============
 Lightweight persistent memory backed by a single JSON file.
 
-Each entry is keyed by dataset fingerprint and records the best model,
-performance metrics, and dataset metadata needed for similarity matching.
+Each entry is keyed by dataset fingerprint and records the best model, performance metrics, and dataset metadata needed for similarity matching.
 
 Meta-learning additions
 -----------------------
@@ -43,19 +42,16 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────
-
+# Helpers
 def now_iso() -> str:
     """Return current UTC time as ISO-8601 string (no microseconds)."""
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-
 
 def _size_bucket(rows: int) -> str:
     if rows < 500:    return "tiny"
     if rows < 5_000:  return "small"
     if rows < 50_000: return "medium"
     return "large"
-
 
 def _compute_similarity(
     profile: Dict[str, Any],
@@ -67,10 +63,10 @@ def _compute_similarity(
 
     Dimensions
     ----------
-    Size bucket match   0.30  — exact categorical match
-    n_classes proximity 0.25  — linear decay, max penalty at diff ≥ 10
-    Imbalance ratio     0.25  — log-scale proximity
-    Feature-type ratio  0.20  — |Δratio_numeric|
+    Size bucket match   0.30  - exact categorical match
+    n_classes proximity 0.25  - linear decay, max penalty at diff ≥ 10
+    Imbalance ratio     0.25  - log-scale proximity
+    Feature-type ratio  0.20  - |Δratio_numeric|
     """
     score = 0.0
 
@@ -103,8 +99,7 @@ def _compute_similarity(
     return round(score, 4)
 
 
-# ── Main class ─────────────────────────────────────────────────────────────
-
+# Main class
 class JSONMemory:
     """
     Persistent agent memory backed by a JSON file.
@@ -127,7 +122,7 @@ class JSONMemory:
     notes               list of important observations
     reflection_history  list of {ts, issues, suggestions, f1_before,
                                   f1_after, replan_count, improved}
-                        — meta-learning track record
+                        - meta-learning track record
     """
 
     _MIN_SIMILARITY      = 0.50   # below this, similarity hints are discarded
@@ -359,8 +354,7 @@ class JSONMemory:
         })
 
 
-# ── Suggestion categorisation (used by meta-learning) ─────────────────────
-
+#  Suggestion categorisation (used by meta-learning)
 def _categorise_suggestions(suggestions: List[str]) -> List[str]:
     """
     Map free-text suggestion strings to coarse categories.
@@ -369,15 +363,15 @@ def _categorise_suggestions(suggestions: List[str]) -> List[str]:
     similar suggestions across different runs are grouped together.
 
     Mapping heuristics (keyword-based):
-      imbalance      — any mention of class_weight, oversampling, imbalance,
+      imbalance      - any mention of class_weight, oversampling, imbalance,
                        SMOTE, threshold
-      feature_eng    — feature engineering, encoding, cardinality
-      ensemble       — ensemble, GradientBoosting, ExtraTrees
-      regularisation — regulariz, overfitting, complexity
-      data_quality   — leakage, label, duplicate, correlated, missing
-      preprocessing  — transform, skew, impute, scale
-      cross_val      — cross-validation, stratified, fold
-      more_data      — more examples, small dataset, collect
+      feature_eng    - feature engineering, encoding, cardinality
+      ensemble       - ensemble, GradientBoosting, ExtraTrees
+      regularisation - regulariz, overfitting, complexity
+      data_quality   - leakage, label, duplicate, correlated, missing
+      preprocessing  - transform, skew, impute, scale
+      cross_val      - cross-validation, stratified, fold
+      more_data      - more examples, small dataset, collect
     """
     keywords: Dict[str, List[str]] = {
         "imbalance":      ["imbalance", "class_weight", "oversamp", "smote", "threshold"],

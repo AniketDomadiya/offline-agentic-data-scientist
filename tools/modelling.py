@@ -12,8 +12,8 @@ impute_strategy parameter
 
 consider_severe_imbalance
     When the plan contains ``consider_severe_imbalance`` (ratio > 10),
-    ``select_models`` skips LogisticRegression entirely — it tends to
-    under-perform severely imbalanced datasets even with class_weight —
+    ``select_models`` skips LogisticRegression entirely - it tends to
+    under-perform severely imbalanced datasets even with class_weight -
     and increases n_estimators for tree ensembles for better minority
     coverage.
 
@@ -27,7 +27,7 @@ StratifiedKFold cross-validation
     for the final held-out test evaluation.
 
 ExtraTreesClassifier
-    Always included as a candidate — fast, competitive, and diverse from RF.
+    Always included as a candidate - fast, competitive, and diverse from RF.
 """
 
 import os
@@ -67,8 +67,7 @@ from sklearn.metrics import (
 )
 
 
-# ── OneHotEncoder sklearn compat shim ──────────────────────────────────────
-
+# OneHotEncoder sklearn compat shim
 def _make_ohe(**kwargs) -> OneHotEncoder:
     """Support sklearn < 1.2 (sparse=False) and ≥ 1.2 (sparse_output=False)."""
     try:
@@ -76,11 +75,7 @@ def _make_ohe(**kwargs) -> OneHotEncoder:
     except TypeError:
         return OneHotEncoder(sparse=False, **kwargs)
 
-
-# ═══════════════════════════════════════════════════════════════════════════
 # Preprocessing builder
-# ═══════════════════════════════════════════════════════════════════════════
-
 def build_preprocessor(
     profile: Dict[str, Any],
     use_power_transform: bool = False,
@@ -162,11 +157,7 @@ def build_preprocessor(
 
     return ColumnTransformer(transformers=transformers, remainder="drop")
 
-
-# ═══════════════════════════════════════════════════════════════════════════
 # Model selection
-# ═══════════════════════════════════════════════════════════════════════════
-
 def select_models(
     profile: Dict[str, Any],
     seed: int = 42,
@@ -200,7 +191,7 @@ def select_models(
     ----------
     profile : dict
     seed    : int
-    plan    : List[str] — current plan list for conditional logic
+    plan    : List[str] - current plan list for conditional logic
 
     Returns
     -------
@@ -277,10 +268,7 @@ def select_models(
     return candidates
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Training
-# ═══════════════════════════════════════════════════════════════════════════
-
 def _compute_metrics(name: str, y_true, y_pred) -> Dict[str, Any]:
     """Compute the standard set of classification metrics."""
     return {
@@ -330,7 +318,7 @@ def train_models(
     X = df.drop(columns=[target]).copy()
     y = df[target].copy()
 
-    # If target is float dtype, assume discrete classes encoded as floats — label-encode to integers
+    # If target is float dtype, assume discrete classes encoded as floats - label-encode to integers
     label_encoder = None
     if pd.api.types.is_float_dtype(y):
         le = LabelEncoder()

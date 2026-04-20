@@ -13,7 +13,7 @@ tries the next best candidate rather than returning an unusable column.
 
 ``is_classification_suitable`` defines "suitable": a column must have
 at least 2 and at most 200 unique values, and for float columns the
-bar is tighter (≤ 20 unique values), since floats are almost always
+bar is tighter (≤ 30 unique values), since floats are almost always
 continuous measurements unless they are encoded labels.
 """
 
@@ -24,8 +24,10 @@ import numpy as np
 import pandas as pd
 
 
-# ── Thresholds ─────────────────────────────────────────────────────────────
+# Thresholds
 _UNIQUE_RATIO_ID     = 0.95
+_LOW_CARDINALITY_THRESHOLD1 = 0.1
+_LOW_CARDINALITY_THRESHOLD2 = 0.3
 _TARGET_KEYWORDS     = frozenset(
     ["target", "label", "class", "output", "result", "status", "y", "outcome"]
 )
@@ -38,10 +40,7 @@ _CAT_UNIQUE_RATIO    = 0.05
 _CAT_VALUE_RANGE     = 20
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Internal helpers
-# ═══════════════════════════════════════════════════════════════════════════
-
 def _detect_id_columns(df: pd.DataFrame) -> List[str]:
     """Return columns that behave as row identifiers (no predictive signal)."""
     id_cols: List[str] = []
@@ -67,7 +66,6 @@ def _detect_id_columns(df: pd.DataFrame) -> List[str]:
                 id_cols.append(col)
     return list(set(id_cols))
 
-
 def _behaves_like_categorical(series: pd.Series) -> bool:
     """Return True if an integer series encodes discrete categories."""
     s = series.dropna()
@@ -76,7 +74,6 @@ def _behaves_like_categorical(series: pd.Series) -> bool:
     ur = s.nunique() / len(s)
     vr = float(s.max() - s.min())
     return ur < _CAT_UNIQUE_RATIO and vr < _CAT_VALUE_RANGE
-
 
 def _classify_columns(
     df: pd.DataFrame,
@@ -105,7 +102,6 @@ def _classify_columns(
                 schema[col] = "categorical" if s.nunique() <= threshold else "text"
     return schema
 
-
 def _score_target_candidates(
     df: pd.DataFrame,
     id_cols: List[str],
@@ -124,6 +120,11 @@ def _score_target_candidates(
     scores: Dict[str, float] = {}
     for col in df.columns:
         score = 0.0
+        unique_ratio = df[col].nunique() / len(df)
+        if unique_ratio < _LOW_CARDINALITY_THRESHOLD1:
+            score += 3
+        elif unique_ratio < _LOW_CARDINALITY_THRESHOLD2:
+            score += 1
         if col in id_cols:
             score -= 4
         if col.lower() in _TARGET_KEYWORDS:
@@ -144,9 +145,7 @@ def _score_target_candidates(
     return scores
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Public helpers
-# ═══════════════════════════════════════════════════════════════════════════
 
 def is_classification_suitable(series: pd.Series) -> bool:
     """
@@ -161,7 +160,7 @@ def is_classification_suitable(series: pd.Series) -> bool:
     - Float numeric: 2–20 unique values only.
       Rationale: floats almost always represent continuous measurements;
       if there are only a handful of unique floats they are likely encoded
-      labels (e.g. 0.0 / 1.0) — otherwise reject.
+      labels (e.g. 0.0 / 1.0) - otherwise reject.
     """
     s = series.dropna()
     if len(s) == 0:
@@ -179,7 +178,6 @@ def is_classification_suitable(series: pd.Series) -> bool:
     if pd.api.types.is_float_dtype(s):
         return unique <= 30  # tight limit: floats are almost always continuous
     return unique <= 50
-
 
 def infer_target_column(df: pd.DataFrame) -> Optional[str]:
     """
@@ -220,7 +218,6 @@ def infer_target_column(df: pd.DataFrame) -> Optional[str]:
 
     return None
 
-
 def dataset_fingerprint(df: pd.DataFrame, target: str) -> str:
     """Produce a stable hash-based fingerprint for a (dataset, target) pair."""
     cols = ",".join(df.columns.astype(str).tolist())
@@ -228,10 +225,7 @@ def dataset_fingerprint(df: pd.DataFrame, target: str) -> str:
     return f"fp_{abs(hash(base)) % (10 ** 12)}"
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Main profiler
-# ═══════════════════════════════════════════════════════════════════════════
-
 def profile_dataset(df: pd.DataFrame, target: str) -> Dict[str, Any]:
     """
     Produce a rich, classification-focused profile of a dataset.
@@ -293,7 +287,7 @@ def profile_dataset(df: pd.DataFrame, target: str) -> Dict[str, Any]:
         "text":        [c for c, t in schema.items() if t == "text"],
     }
 
-    # Target — always classification
+    # Target - always classification
     profile["target"]           = str(target)
     profile["target_dtype"]     = str(y.dtype)
     profile["is_classification"] = True
@@ -358,7 +352,7 @@ def profile_dataset(df: pd.DataFrame, target: str) -> Dict[str, Any]:
     if profile["shape"]["cols"] > 100:
         notes.append("High dimensionality (>100 cols): ordinal encoding recommended.")
     if profile["duplicate_count"] > 0:
-        notes.append(f"{profile['duplicate_count']} duplicate rows detected — will be removed.")
+        notes.append(f"{profile['duplicate_count']} duplicate rows detected - will be removed.")
     if profile["imbalance_ratio"] >= 3.0:
         notes.append(
             f"Class imbalance (ratio={profile['imbalance_ratio']:.1f}): "
@@ -376,9 +370,9 @@ def profile_dataset(df: pd.DataFrame, target: str) -> Dict[str, Any]:
     if profile["high_cardinality_features"]:
         notes.append(f"High-cardinality categorical(s): {profile['high_cardinality_features']}.")
     if profile["feature_types"]["text"]:
-        notes.append(f"Text feature(s) detected — will be excluded from modelling.")
+        notes.append(f"Text feature(s) detected - will be excluded from modelling.")
     if profile["feature_types"]["datetime"]:
-        notes.append(f"Datetime feature(s) — year/month will be extracted.")
+        notes.append(f"Datetime feature(s) - year/month will be extracted.")
 
     profile["notes"] = notes
     return profile

@@ -102,9 +102,7 @@ _LARGE_ROWS        = 50_000 # ≥ → scenario:large
 _HIGH_DIM_COLS     = 100    # > → scenario:high_dim
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Internal helpers
-# ═══════════════════════════════════════════════════════════════════════════
 def _detect_scenario(dataset_profile: Dict[str, Any]) -> str:
     """
     Return the single most dominant scenario label.
@@ -247,13 +245,13 @@ def _inject_signal_tasks(
     missing_pct = dataset_profile.get("missing_pct", {})
     max_missing = max(missing_pct.values(), default=0.0) if missing_pct else 0.0
 
-    # ── Find BUILD_PRE anchor for insertion of data-prep tasks ─────────────
+    # Find BUILD_PRE anchor for insertion of data-prep tasks 
     try:
         pre_idx = plan.index(TASK_BUILD_PRE)
     except ValueError:
         pre_idx = len(plan)
 
-    # ── 1. Data preparation tasks ──────────────────────────────────────────
+    # 1. Data preparation tasks
     data_prep: List[str] = []
 
     if dup_count > 0 and TASK_DROP_DUPES not in in_plan:
@@ -282,8 +280,7 @@ def _inject_signal_tasks(
         plan.insert(pre_idx, task)
     pre_idx += len(data_prep)  # shift anchor to reflect insertions
 
-    # ── 2. Preprocessing strategy ──────────────────────────────────────────
-
+    # 2. Preprocessing strategy
     # Imputation strategy selection:
     # If NO features are highly skewed, mean imputation is appropriate.
     # If any are skewed, keep default (median) and apply PowerTransformer.
@@ -312,8 +309,7 @@ def _inject_signal_tasks(
         plan.insert(pre_idx, TASK_IMBALANCE)
         pre_idx += 1
 
-    # ── 3. Training strategy ───────────────────────────────────────────────
-
+    # 3. Training strategy 
     # Cross-validation for small datasets (if not from scenario template)
     if rows < _SMALL_ROWS and TASK_CROSS_VAL not in in_plan:
         try:
@@ -338,10 +334,6 @@ def _inject_signal_tasks(
 
     return plan
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Public API
-# ═══════════════════════════════════════════════════════════════════════════
 
 def create_plan(
     dataset_profile: Dict[str, Any],
@@ -473,10 +465,7 @@ def create_replan(
     return new_plan
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Plan explainability
-# ═══════════════════════════════════════════════════════════════════════════
-
 _TASK_DESCRIPTIONS: Dict[str, str] = {
     TASK_PROFILE:          "Always first - confirms dataset schema and extracts all signals.",
     TASK_BUILD_PRE:        "Build ColumnTransformer (imputation, scaling, encoding).",
