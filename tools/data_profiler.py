@@ -177,7 +177,7 @@ def is_classification_suitable(series: pd.Series) -> bool:
     if pd.api.types.is_integer_dtype(s):
         return unique <= 50
     if pd.api.types.is_float_dtype(s):
-        return unique <= 20  # tight limit: floats are almost always continuous
+        return unique <= 30  # tight limit: floats are almost always continuous
     return unique <= 50
 
 
