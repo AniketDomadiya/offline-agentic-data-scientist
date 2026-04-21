@@ -107,7 +107,7 @@ class AgenticDataScientist:
     def load_data(self, path: str) -> pd.DataFrame:
         self.log(f"Loading dataset: {path}")
         df = pd.read_csv(path)
-        self.log(f"Loaded {df.shape[0]} rows × {df.shape[1]} cols")
+        self.log(f"Loaded {df.shape[0]} rows * {df.shape[1]} cols")
         return df
 
     # Data preparation
@@ -275,7 +275,7 @@ class AgenticDataScientist:
         profile = profile_dataset(df, self.ctx.target)
         fp      = dataset_fingerprint(df, self.ctx.target)
         self.log(
-            f"Profile: {profile['shape']['rows']} rows × {profile['shape']['cols']} cols, "
+            f"Profile: {profile['shape']['rows']} rows * {profile['shape']['cols']} cols, "
             f"imbalance_ratio={profile['imbalance_ratio']:.2f}, "
             f"n_classes={profile['n_classes']}"
         )

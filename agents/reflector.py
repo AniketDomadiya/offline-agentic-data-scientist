@@ -787,7 +787,7 @@ def reflect(
     # 3. Leakage suspicion
     if bal_acc >= _LEAKAGE_BA:
         raw_issues.append((
-            f"Balanced accuracy={bal_acc:.3f} ≥ {_LEAKAGE_BA}: suspiciously high. "
+            f"Balanced accuracy={bal_acc:.3f} >= {_LEAKAGE_BA}: suspiciously high. "
             "Possible target leakage or trivially separable classes.",
             0.95,
         ))
@@ -867,7 +867,7 @@ def reflect(
         if gap < 0.01:
             raw_suggestions.append((
                 f"'{best_model}' and '{ranked[1].get('model')}' are nearly tied "
-                f"(Δbal_acc < 0.01): the simpler model may be preferable.",
+                f"(bal_acc < 0.01): the simpler model may be preferable.",
                 0.40,
             ))
 
