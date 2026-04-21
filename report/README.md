@@ -1,156 +1,526 @@
-# CE888 — Technical Report: Offline Agentic Data Scientist
+# CE888 - Technical Report
+# Offline Agentic Data Scientist
 
 **Module:** CE888 Data Science and Decision Making  
-**Academic Year:** 2025–2026  
+**Academic Year:** 2025–2026
+
+---
+
+## Table of Contents
+
+1. [Introduction](#1-introduction)
+2. [System Architecture](#2-system-architecture)
+3. [Dataset Understanding](#3-dataset-understanding)
+4. [Planning Logic](#4-planning-logic)
+5. [Modelling and Evaluation](#5-modelling-and-evaluation)
+6. [Reflection and Re-planning](#6-reflection-and-re-planning)
+7. [Memory and Learning](#7-memory-and-learning)
+8. [Ethics and Limitations](#8-ethics-and-limitations)
+9. [Conclusion and Future Work](#9-conclusion-and-future-work)
 
 ---
 
 ## 1. Introduction
 
-The standard approach to building a machine learning pipeline is manual: a data scientist loads a dataset, explores it, decides how to clean it, picks some models, evaluates them, and writes up findings. This works well when someone with domain knowledge is in the loop, but it does not scale, it is not reproducible across datasets, and it does not learn from what it has done before.
+The standard approach to machine learning is manual: a data scientist loads a dataset, explores it, decides how to handle missing values and imbalanced classes, picks models, evaluates results, and writes up findings. This works when a knowledgeable person is in the loop - but it does not scale, it is inconsistent across datasets, and it does not learn from what it has done before.
 
-This project builds an alternative — an Offline Agentic Data Scientist that can receive an unseen CSV file and autonomously produce a full classification pipeline without human intervention. The agent profiles the data, forms a plan, executes it, evaluates the results, reflects on what went wrong, and if needed, revises its strategy and tries again. All of this happens locally, without any internet APIs, cloud services, or large language models.
+This project builds an alternative: an **Offline Agentic Data Scientist** that receives an unseen CSV file and autonomously produces a complete classification pipeline. The system profiles the data, forms a conditional plan, prepares the data, trains and evaluates candidate models, reflects on what went wrong, and if performance is poor enough, revises its strategy and tries again.
 
-The reason to take an agentic approach rather than building a fixed pipeline comes down to one problem: no single pipeline fits all datasets. A tiny 150-row dataset needs cross-validation and simpler models. A dataset with a 10:1 class imbalance needs balanced class weights and ensemble methods. A dataset with heavily skewed numeric features needs a power transform before scaling. A fixed pipeline either ignores these differences (producing silently wrong results) or requires the user to configure everything manually (defeating the purpose of automation). An agent that reads the data and reasons about what to do next handles this variation naturally.
+### Why Agentic?
 
-The system is built entirely with Python and scikit-learn, follows the provided template structure, and has been tested on four diverse classification datasets: a synthetic footwear sales dataset (Sales.csv), the Iris flower dataset, the Titanic survival dataset, and the Adult Income census dataset.
+The core problem with a fixed pipeline is that **no single set of steps fits all datasets**. Consider just three examples:
+
+| Dataset type | What is needed | What a fixed pipeline does wrong |
+|---|---|---|
+| 150-row dataset | Cross-validation; simpler models | Gives unreliable single-split metrics |
+| 10:1 class imbalance | Balanced weights; ensemble models | Over-predicts majority class silently |
+| Skewed numeric features | PowerTransformer before scaling | Linear models produce poor boundaries |
+
+An agent that reads the data first and then decides what to do handles all of these cases correctly. A fixed pipeline either ignores them or requires manual configuration - defeating the purpose of automation.
+
+### Scope
+
+- Language and libraries: Python, scikit-learn, pandas, NumPy, matplotlib
+- Task type: tabular binary and multi-class classification
+- Execution: fully offline, no APIs, no cloud services, no LLMs
+- Testing: four diverse classification datasets
 
 ---
 
 ## 2. System Architecture
 
-The system is organised into two layers: agents that reason and decide, and tools that do computational work.
+The system is organised into two layers: **agents** that reason and decide, and **tools** that do computational work. The orchestrator coordinates everything.
 
-**Agents:**
-- `agents/planner.py` — reads a dataset profile and produces a named, ordered list of tasks to execute
-- `agents/reflector.py` — analyses the results after training and identifies what went wrong, what to do about it, and whether the agent should try again with a different plan
-- `agents/memory.py` — persists what the agent has learned across runs, so it can make smarter decisions on similar datasets in the future
+### Component Map
 
-**Tools:**
-- `tools/data_profiler.py` — loads a dataset and extracts a rich set of signals: column types, missing values, class distribution, skewness, outliers, high correlations, and more
-- `tools/modelling.py` — builds the preprocessing pipeline, selects candidate models based on the plan, trains them, and optionally runs cross-validation
-- `tools/evaluation.py` — picks the best model, produces a confusion matrix, generates a classification report, and writes a markdown summary report
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    AgenticDataScientist (Orchestrator)              │
+│                         agentic_data_scientist.py                   │
+└────────────┬──────────────┬──────────────┬──────────────────────────┘
+             │              │              │
+    ┌────────▼──────┐  ┌────▼────────┐  ┌─▼──────────────┐
+    │    AGENTS     │  │    TOOLS    │  │    MEMORY       │
+    │               │  │             │  │                 │
+    │  planner.py   │  │data_profiler│  │  memory.py      │
+    │  reflector.py │  │modelling.py │  │  agent_memory   │
+    │               │  │evaluation.py│  │  .json          │
+    └───────────────┘  └─────────────┘  └─────────────────┘
+```
 
-**Orchestrator:**
-- `agentic_data_scientist.py` — the central coordinator that calls each component in order, passes outputs between them, manages the replan loop, and handles errors cleanly
-- `run_agent.py` — the command-line entry point
+### End-to-End Data Flow
 
-The data flow is: load CSV → profile → consult memory → plan → prepare data → build preprocessor → select models → train → evaluate → reflect → optionally replan and repeat → save all artefacts.
+```
+CSV file
+   │
+   ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 1. LOAD & VALIDATE                                               │
+│    • Read CSV  →  check shape, empty check, column count         │
+│    • Validate or infer target column (scoring-based detection)   │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 2. PROFILE                                                       │
+│    • Column types, missing %, skewness, outliers, correlations   │
+│    • Class distribution, imbalance ratio, duplicate count        │
+│    • Produces: dataset_profile dict                              │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 3. MEMORY LOOKUP                                                 │
+│    • Exact fingerprint match → prior best model known            │
+│    • Similarity match → experience from similar datasets         │
+│    • No match → plan from scratch                                │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 4. PLAN                                                          │
+│    • Detect scenario (tiny / imbalanced / large / ...)           │
+│    • Inject signal-driven tasks on top of scenario template      │
+│    • Produces: ordered task list + plain-English justification   │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                     ┌─────────▼──────────────────────────────────┐
+                     │ 5. EXECUTION LOOP (may repeat on replan)   │
+                     │                                             │
+                     │   DATA PREP  →  PREPROCESS  →  TRAIN       │
+                     │       │             │            │          │
+                     │  drop_dupes   impute+scale   RF/ET/GB/LR    │
+                     │  extract_dt   OHE/ordinal    DummyBaseline  │
+                     │  drop_corr    PowerTransform  StratKFold?   │
+                     │                                             │
+                     │   EVALUATE  →  REFLECT  →  REPLAN?         │
+                     │       │             │            │          │
+                     │  confusion  per-class F1   create_replan    │
+                     │  matrix     root cause     (if warranted)   │
+                     └─────────────────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 6. PERSIST ARTEFACTS                                             │
+│    report.md │ plan.json │ metrics.json │ reflection.json        │
+│    plan_explanation.txt │ confusion_matrix.png │ eda_summary.json│
+│    agent_memory.json (updated for future runs)                   │
+└──────────────────────────────────────────────────────────────────┘
+```
 
-Every decision the agent makes is recorded. The plan is saved to `plan.json`, the justification for each step is saved to `plan_explanation.txt`, the metrics go into `metrics.json`, and the reflection goes into `reflection.json`. The markdown report brings all of this together into a human-readable summary. This means a user can always audit why the agent did what it did.
+### Files and Responsibilities
+
+| File | Layer | Responsibility |
+|---|---|---|
+| `run_agent.py` | Entry point | CLI argument parsing; calls orchestrator |
+| `agentic_data_scientist.py` | Orchestrator | Coordinates all components; manages replan loop; handles errors |
+| `agents/planner.py` | Agent | Scenario detection; plan template selection; signal-task injection; replan logic |
+| `agents/reflector.py` | Agent | Multi-dimensional result analysis; root cause diagnosis; replan decision |
+| `agents/memory.py` | Agent | Persistent storage; similarity retrieval; meta-learning from outcomes |
+| `tools/data_profiler.py` | Tool | Signal extraction; target detection; column classification |
+| `tools/modelling.py` | Tool | Preprocessing pipeline; model selection; training with optional CV |
+| `tools/evaluation.py` | Tool | Metrics; confusion matrix; markdown report writing |
 
 ---
 
 ## 3. Dataset Understanding
 
-Before the agent can plan anything, it needs to understand the data. The profiling step (`profile_dataset`) extracts a comprehensive set of signals that drive every downstream decision.
+Before planning anything, the agent must understand the data. The `profile_dataset` function extracts a comprehensive set of signals that drive every downstream decision.
 
-**Column classification** is the first challenge. Rather than simply trusting pandas dtypes, the profiler applies heuristics to detect the actual semantic type of each column. An integer column with only 3 distinct values is treated as categorical, not numeric. A string column where 80% of values parse as dates is treated as a datetime. A column where every value is unique and monotonically increasing is treated as an identifier and excluded from modelling. These rules come from the EDA notebook developed in Deliverable 1 and are directly ported into the agent.
+### Signals Extracted
 
-**Target detection** uses a scoring system. Each column receives points for matching a known target keyword (target, label, class, outcome), being the last column in the dataset, and loses points for being an identifier or looking like a datetime. Candidates are then checked for classification suitability — the target must have between 2 and 200 discrete values, with a tighter limit of 20 for float columns (since floats usually represent continuous measurements). If the top-scored column fails this check, the system automatically tries the next candidate rather than crashing. This design means the agent handles ambiguous or unconventionally formatted datasets gracefully.
+| Signal | How detected | What it drives |
+|---|---|---|
+| **Column type** | dtype + heuristics (integer range, datetime parse attempt, unique ratio) | Which transformer to apply |
+| **ID columns** | "id" in name, monotonic, high unique ratio, constant step | Excluded from modelling |
+| **Target column** | Scoring: keyword match +4, last column +2, ID −4, datetime −4 | Defines the classification task |
+| **Missing values** | Per-column `isna().mean() * 100` | Imputation strategy or column drop |
+| **Class imbalance** | `majority_count / minority_count` | Balanced weights, metric choice |
+| **Skewness** | `df.skew()`, threshold |skew| > 1.0 | PowerTransformer in preprocessor |
+| **Outliers** | IQR method per numeric column | Noted in report |
+| **Correlations** | Pearson |r| > 0.80 | Drop one column per pair |
+| **High-cardinality cats** | Unique count > 20 | OrdinalEncoder instead of OHE |
+| **Datetime columns** | `pd.to_datetime` conversion rate ≥ 80% | Extract year / month features |
 
-**Imbalance detection** computes the majority-to-minority class ratio. This single number drives multiple downstream decisions: whether to apply balanced class weights, whether to exclude weaker models, which metrics to prioritise in the report, and how the reflector interprets accuracy versus balanced accuracy divergence.
+### Target Detection Logic
 
-**Skewness, outliers, and correlations** are all extracted from the numeric features. Highly skewed features (absolute skewness > 1.0) trigger the PowerTransformer in the preprocessor. Highly correlated feature pairs (Pearson |r| > 0.8) are flagged and optionally dropped before training. These signals matter because they affect model performance in concrete ways: linear models and distance-based models are sensitive to skewness and redundant features in ways that tree models are not.
+Target detection uses a **scoring system** rather than a simple lookup. The key insight is that after scoring, candidates are checked for **classification suitability** before being accepted - a highly-scored column that turns out to be a continuous float is skipped, and the next candidate is tried automatically.
 
-On the Sales dataset, for example, profiling detected that `model_name` has high cardinality (many unique product names), `order_date` is a datetime column, `order_id` is an identifier, `final_price_usd` and `base_price_usd` are highly correlated (|r| > 0.8), and `revenue_usd` is moderately skewed with outliers. Each of these findings directly changed what the agent did next.
+```
+For each column → score:
+  + 4  if column name matches: target, label, class, outcome, y, status, result, output
+  + 2  if it is the last column in the dataset
+  − 4  if detected as an identifier column
+  − 4  if it looks like a datetime
+
+Sort by score descending →
+  For each candidate (high score first):
+    if is_classification_suitable(column):  ← 2–50 unique for int, ≤20 for float
+      return this column ✓
+    else: skip, try next candidate
+```
+
+### Four Test Datasets: Signal Comparison
+
+| Signal | Sales.csv | Iris | Titanic | Adult Income |
+|---|---|---|---|---|
+| Rows | 30 000 | 150 | 891 | 48 842 |
+| Classes | 21 | 3 | 2 | 2 |
+| Imbalance ratio | ~1.05 | 1.0 | ~1.7 | ~3.1 |
+| Missing values | None | None | Age 20 % | Occupation 5.7 % |
+| Datetime columns | `order_date` | - | - | - |
+| ID columns | `order_id` | - | - | - |
+| High-cardinality cats | `model_name` | - | - | `native_country` |
+| Skewed features | `revenue_usd` | - | - | `capital_gain`, `capital_loss` |
+| Correlated pairs | price columns | - | - | `education` / `education_num` |
+| Agent scenario | standard | **tiny** | standard | **large** |
+
+No two datasets trigger exactly the same combination of plan tasks, which is the whole point of diverse evaluation.
 
 ---
 
 ## 4. Planning Logic
 
-The planner is the most important component for demonstrating autonomy. It takes the dataset profile and produces an ordered, named list of task strings that the orchestrator executes. Every task in the plan is there because of a specific signal in the data — nothing is added by default just to look comprehensive.
+The planner is the most important component for demonstrating autonomy. It takes the profile and produces an **ordered, named list of task strings** that the orchestrator executes conditionally.
 
-**Scenario detection** happens first. The planner classifies the dataset into one of eight scenarios based on a strict precedence order: tiny (fewer than 200 rows), severe imbalance (ratio > 10), high dimensional (more than 100 columns), heavy missing (over 20% missing in any column), small (200–499 rows), imbalanced (ratio 3–10), large (50,000+ rows), or standard. This label becomes the base template for the plan.
+### Step 1 - Scenario Detection
 
-For example, the Iris dataset (150 rows) triggers `scenario:tiny`, which automatically includes `use_cross_validation` in the base plan. There is no threshold to tune or flag to set — it follows from the data. The Adult Income dataset (48,842 rows) triggers `scenario:large`, which uses the full model suite including GradientBoosting and excludes SVC due to the computational cost at that scale.
+The planner first classifies the dataset into one primary scenario using a strict precedence order:
 
-On top of the scenario base, the planner injects additional tasks based on individual signals. If duplicates are detected, `drop_duplicates` is inserted before any training step. If datetime columns exist, `extract_datetime` extracts year and month as numeric features. If columns have over 40% missing values, `drop_severe_missing` removes them outright rather than trusting imputation at that level. If highly correlated pairs are found, `drop_correlated` drops one column from each pair to reduce redundancy.
+```
+1.  tiny          rows < 200                    (dominates everything)
+2.  severe_imb    imbalance_ratio > 10
+3.  high_dim      cols > 100
+4.  heavy_missing max column missing > 20%
+5.  small         rows 200–499
+6.  imbalanced    imbalance_ratio 3–10
+7.  large         rows ≥ 50 000
+8.  standard      none of the above
+```
 
-The preprocessing strategy is also determined by the plan. If no highly skewed features are detected, `impute_numeric_mean` is added, telling the preprocessor to use mean imputation for numeric columns. If skewed features are present, `apply_skew_transform` is added instead, telling the preprocessor to apply PowerTransformer (Yeo-Johnson) after scaling. These two tasks are mutually exclusive by design — the plan never contains both.
+Each scenario has a base plan template. For example:
 
-Memory hints influence the plan in one specific way: if a prior run on a matching or similar dataset found that a particular model performed best, `prioritize_model:ModelName` is inserted between model selection and training. This causes that model to be evaluated first. During a replan, if that model performed poorly and F1 fell below 0.50, the hint is removed so the agent does not keep repeating a failing strategy.
+| Scenario | Base plan tasks always included |
+|---|---|
+| `tiny` | `profile_dataset` → `build_preprocessor` → `select_models` → `train_models` → **`use_cross_validation`** → `evaluate` → `reflect` → `write_report` |
+| `severe_imb` | ... → **`consider_imbalance`** → **`consider_severe_imbalance`** → ... |
+| `large` | Standard pipeline; SVC excluded; full model suite |
+| `standard` | Minimal pipeline; all models evaluated |
 
-Every task and its justification is written to `plan_explanation.txt` in plain English, so the agent's reasoning is always auditable. This is important because an agent that produces correct outputs but cannot explain why is not truly autonomous — it is just lucky.
+### Step 2 - Signal-Task Injection
+
+On top of the scenario base, individual signals inject additional tasks:
+
+```
+Signal detected                     →  Task inserted (before build_preprocessor)
+────────────────────────────────────────────────────────────────────────────
+Duplicate rows > 0                  →  drop_duplicates
+ID columns detected                 →  drop_id_columns
+Datetime columns exist              →  extract_datetime
+Any column > 40% missing            →  drop_severe_missing
+High-correlation pairs (|r|>0.8)    →  drop_correlated
+Text-like columns present           →  handle_text_features
+No highly-skewed features           →  impute_numeric_mean   ─┐ mutually
+Highly-skewed features exist        →  apply_skew_transform  ─┘ exclusive
+High-cardinality categoricals       →  handle_high_cardinality
+Imbalance ratio 3–10                →  consider_imbalance
+Imbalance ratio > 10                →  consider_imbalance + consider_severe_imbalance
+rows < 500 (if not in scenario)     →  use_cross_validation
+Memory hint available               →  prioritize_model:<name>
+```
+
+### Real Plan Comparison
+
+Here are the actual plans generated for three of the four test datasets:
+
+**Iris (150 rows, balanced, all-numeric):**
+```
+profile_dataset → scenario:tiny → impute_numeric_mean →
+build_preprocessor → select_models → train_models →
+use_cross_validation → evaluate → reflect → write_report
+```
+
+**Sales.csv (30 000 rows, mixed types, datetime, high-cardinality):**
+```
+profile_dataset → scenario:standard → drop_id_columns →
+extract_datetime → drop_correlated → handle_high_cardinality →
+impute_numeric_mean → build_preprocessor → select_models →
+train_models → evaluate → reflect → write_report
+```
+
+**Adult Income (49K rows, imbalanced, skewed features):**
+```
+profile_dataset → scenario:large → apply_skew_transform →
+handle_high_cardinality → consider_imbalance →
+build_preprocessor → select_models → train_models →
+evaluate → reflect → write_report
+```
+
+Every plan step is justified in plain English in `plan_explanation.txt`. For example, the `drop_correlated` task in the Sales plan includes the note: *"Highly correlated pairs (|r|>0.8) - drop one per pair to reduce redundancy."*
 
 ---
 
 ## 5. Modelling and Evaluation
 
-**Preprocessing** is handled by a `ColumnTransformer` that applies different pipelines to numeric and categorical columns. Numeric columns go through imputation (mean or median depending on the plan) followed by StandardScaler. When skew transform is active, PowerTransformer with the Yeo-Johnson method is applied after scaling, which handles both positive and negative skewness without requiring all values to be positive. Categorical columns with normal cardinality receive SimpleImputer followed by OneHotEncoder. High-cardinality categorical columns receive OrdinalEncoder instead, which avoids the feature explosion that one-hot encoding would produce on columns like `native_country` in the Adult dataset (41 unique values) or `occupation`.
+### Preprocessing Pipeline
 
-**Model selection** is also plan-driven. The standard candidate set includes a DummyClassifier (most-frequent strategy), LogisticRegression, RandomForest, ExtraTrees, GradientBoosting (for datasets up to 50,000 rows), and SVC (for smaller datasets under 20,000 rows with fewer than 200 columns). DummyClassifier is always included — it provides the baseline against which real models are measured. When the plan contains `consider_severe_imbalance`, LogisticRegression is excluded entirely since it tends to predict the majority class even with balanced weights when the imbalance is extreme. When `emphasize_ensemble` is active (triggered during a replan after very low F1), LogisticRegression is excluded and GradientBoosting is always included regardless of dataset size.
+The `build_preprocessor` function constructs a `ColumnTransformer` with different pipelines for different column types. The specific steps depend on the plan:
 
-All models that support `class_weight` receive `class_weight='balanced'` when imbalance is detected. For GradientBoosting, which does not natively support this parameter, the balanced weighting on other models compensates.
+```
+Numeric columns:
+   SimpleImputer (mean or median based on plan)
+   → StandardScaler
+   → [PowerTransformer Yeo-Johnson, if apply_skew_transform in plan]
 
-**Evaluation** goes beyond a single accuracy number. The primary metrics are balanced accuracy and macro-averaged F1. Balanced accuracy is the average of recall per class, which gives equal weight to each class regardless of how common it is — this is the right metric when classes are not equally represented. Macro F1 similarly averages F1 across classes without weighting by support. When cross-validation is active, the CV results are stored in the metrics alongside the test set results, giving a more reliable estimate of generalisation performance.
+Categorical columns (low cardinality):
+   SimpleImputer (most frequent)
+   → OneHotEncoder (handle_unknown='ignore')
 
-A confusion matrix is saved as a PNG for every run. The classification report (per-class precision, recall, and F1 with support counts) is saved as a string and passed to the reflector for per-class analysis.
+Categorical columns (high cardinality, if handle_high_cardinality in plan):
+   SimpleImputer (most frequent)
+   → OrdinalEncoder (unknown_value=-1)
+```
+
+Why OrdinalEncoder for high-cardinality columns rather than always using OHE: a column like `native_country` with 41 unique values would produce 41 new binary columns. On larger datasets this inflates training time and memory without meaningful benefit over a simple integer encoding.
+
+### Candidate Models
+
+| Model | Always included? | Excluded when |
+|---|---|---|
+| `DummyMostFrequent` | Yes - baseline | Never |
+| `LogisticRegression` | Yes | `consider_severe_imbalance` or `emphasize_ensemble` in plan |
+| `RandomForest` | Yes | Never |
+| `ExtraTrees` | Yes | Never |
+| `GradientBoosting` | Rows ≤ 50 000 | Large datasets (unless replan forces it) |
+| `SVC (RBF)` | Rows ≤ 20 000, cols ≤ 200 | Large or high-dimensional datasets |
+
+`class_weight='balanced'` is applied to all classifiers that support it whenever `consider_imbalance` is in the plan. This instructs each model to penalise misclassification of minority classes proportionally more than majority classes.
+
+### Primary Metrics
+
+Accuracy alone is not used as the primary metric. The agent uses:
+
+| Metric | Why |
+|---|---|
+| **Balanced accuracy** | Average recall per class - gives equal weight regardless of class size |
+| **Macro F1** | Averages F1 across classes without weighting by support |
+| **Per-class F1** | Reveals which specific classes are hardest to learn |
+
+### Statistical Context
+
+The reflector adds statistical context alongside raw metrics:
+
+- **Cohen's h effect size** - measures whether improvement over the dummy baseline is practically meaningful (not just numerically non-zero). Categories: negligible < 0.20, small 0.20–0.50, medium 0.50–0.80, large > 0.80.
+- **95% Wilson confidence interval** on balanced accuracy - quantifies uncertainty given test set size. More reliable than the normal approximation near 0 or 1.
 
 ---
 
 ## 6. Reflection and Re-planning
 
-Reflection is where the agent's autonomy is most visible. After every training cycle, `reflect()` analyses the results across multiple dimensions and produces a structured report of issues, suggestions (sorted by expected impact), a root cause diagnosis, and a recommendation on whether to replan.
+### What the Reflector Analyses
 
-**Baseline comparison** computes the improvement over the DummyClassifier in balanced accuracy. If the improvement is less than 0.05, this is flagged as a potentially serious problem — the model is barely better than predicting the most common class every time. This check is supplemented by a Cohen's h effect size calculation, which measures whether the improvement is practically meaningful rather than just numerically non-zero, and a 95% Wilson confidence interval on balanced accuracy, which quantifies how uncertain the metric estimate is given the test set size.
+After every training cycle, `reflect()` runs eight analytical checks:
 
-**Per-class analysis** parses the sklearn classification report string to extract per-class F1, precision, recall, and support. Classes with F1 below 0.50 are flagged individually. When there is a large spread between the best and worst class F1 scores (over 0.30), this is flagged as a class confusion problem. On the Sales dataset with 21 classes, this analysis reveals which specific rating values (e.g. 3.0 and 5.0, which are rarer) the model struggles with most.
+```
+1.  Dummy baseline comparison    →  effect size (Cohen's h) + Wilson 95% CI
+2.  Absolute performance bands   →  F1 < 0.60 (weak) or < 0.75 (moderate)
+3.  Leakage suspicion            →  balanced accuracy ≥ 0.97 (too good?)
+4.  Imbalance bias               →  accuracy >> balanced accuracy by > 0.10
+5.  Per-class analysis           →  F1 per class, F1 spread across classes
+6.  Precision-recall tradeoff    →  |precision − recall| > 0.15 (bias check)
+7.  Overfitting / underfitting   →  CV balanced accuracy vs test accuracy gap
+8.  Confusion matrix patterns    →  most confused pair, zero-correct classes
+```
 
-**Overfitting and underfitting detection** uses the cross-validation results when available. If the average CV balanced accuracy exceeds the test balanced accuracy by more than 0.10, overfitting is diagnosed. If both CV and test balanced accuracy are below 0.60, underfitting is diagnosed. Without CV results, the fallback heuristic flags low absolute performance as likely underfitting.
+### Root Cause Diagnosis
 
-**Confusion matrix pattern analysis** examines the raw matrix for two specific patterns: the most confused class pair (the off-diagonal cell with the highest count) and any class with zero correct predictions despite having test samples. Both are meaningful signals — the first suggests two classes that are hard to distinguish, the second suggests a class the model has completely failed to learn.
+All checks are synthesised into a single root cause label. This makes the agent's diagnosis auditable:
 
-**Root cause diagnosis** synthesises all of these signals into a single label: majority class bias, overfitting, underfitting, zero class, weak feature signal, data quality, insufficient data, class confusion, or ok. This label appears in the report and is used to write specific replan notes (for example, if the diagnosis is majority class bias, the replan note says "imbalance strategy injected or strengthened").
+| Root cause | Condition | What changes in replan |
+|---|---|---|
+| `majority_class_bias` | Accuracy >> balanced accuracy with imbalance | Force `consider_imbalance` |
+| `overfitting` | CV accuracy >> test accuracy (gap > 0.10) | Flag for regularisation |
+| `underfitting` | Both CV and test accuracy < 0.60 | Add `emphasize_ensemble` |
+| `zero_class` | Any class with zero correct predictions | Force balanced weights |
+| `weak_feature_signal` | < 0.05 improvement over dummy | Investigate leakage / features |
+| `data_quality` | All models converge (std < 0.03) | Add `drop_correlated` |
+| `class_confusion` | Multi-class, large F1 spread | Ensemble emphasis |
+| `insufficient_data` | < 500 rows + poor F1 | Add cross-validation |
+| `ok` | None of the above | No replan needed |
 
-**Replan decisions** are governed by four conditions that must all be true: at least one issue was identified, F1 is below an adaptive threshold (which relaxes slightly for harder multi-class problems), balanced accuracy is below 0.70, and diminishing returns have not been detected. The diminishing returns check prevents the agent from running the same failing strategy in a loop — if a prior replan produced less than 0.02 improvement in F1, replanning is blocked even if other conditions are met.
+### Replan Decision Logic
 
-The `create_replan` function in the planner is the single source of plan revision logic. The reflector calls it rather than containing its own plan-editing code. Replan strategies include injecting imbalance handling if it was absent, adding `emphasize_ensemble` if F1 is very low, adding correlated-feature drop if all models converged, and removing a stale memory hint if the suggested model performed poorly.
+Replanning is only triggered when **all four conditions** are met:
+
+```
+✓ At least one issue identified
+✓ Macro F1 < adaptive threshold  (relaxes for harder multi-class problems)
+✓ Balanced accuracy < 0.70
+✓ No diminishing returns detected (prior replan improved F1 by < 0.02 → stop)
+✓ Not a leakage situation (balanced accuracy ≥ 0.97 → replan won't help)
+```
+
+The **diminishing returns guard** is important: without it, the agent would keep replanning with small variations and never converge. If the last replan produced less than 0.02 improvement in F1, further replanning is blocked even if other conditions are met.
+
+### Replan Strategies
+
+Different root causes trigger different plan changes:
+
+```
+Root cause: majority_class_bias   →  insert consider_imbalance before train_models
+Root cause: underfitting          →  append emphasize_ensemble (drop LR, boost GB/ET)
+Root cause: data_quality          →  insert drop_correlated (break the convergence)
+Root cause: overfitting           →  noted in report; replan with smaller models
+Stale memory hint + low F1        →  remove prioritize_model:<name> from plan
+Very low F1 (< 0.50)              →  append emphasize_ensemble
+```
 
 ---
 
 ## 7. Memory and Learning
 
-The memory system serves two functions: helping the agent make better decisions on the first run of a new dataset, and helping it avoid repeating failures across multiple runs of the same dataset.
+The memory system serves two separate functions: **warm starting new runs** and **avoiding repeated failures** on datasets the agent has seen before.
 
-**Storage** is backed by a single JSON file (`agent_memory.json`). Each entry is keyed by a dataset fingerprint — a stable hash derived from the shape, target column name, and column names. Every time a run completes, the record for that fingerprint is updated with the best model found, all model metrics, the plan used, the reflection status, and metadata needed for similarity matching (size bucket, number of classes, imbalance ratio, feature type counts).
+### What is Stored
 
-**Exact match retrieval** is the first lookup strategy. If the fingerprint matches a prior run exactly, the planner knows which model worked best and inserts a `prioritize_model` hint into the plan. On the second run of a dataset, the agent does not rediscover the best model from scratch — it starts from the known winner.
+Every completed run updates the JSON memory store with:
 
-**Similarity-based retrieval** handles unseen datasets. When no exact match exists, the system computes a similarity score between the new dataset's profile and every stored record across four dimensions: dataset size bucket (30% weight), number of classes (25%), imbalance ratio on a log scale (25%), and the ratio of numeric to categorical features (20%). If the best match scores above 0.50, it is used as a hint. This means experience with one imbalanced binary classification dataset influences how the agent approaches a different imbalanced binary dataset it has never seen.
+```json
+{
+  "fp_123456789": {
+    "last_seen": "2026-04-15T14:22:10Z",
+    "target": "income",
+    "shape": {"rows": 48842, "cols": 14},
+    "size_bucket": "large",
+    "n_classes": 2,
+    "imbalance_ratio": 3.1,
+    "n_numeric": 6,
+    "n_categorical": 8,
+    "best_model": "GradientBoosting",
+    "best_metrics": {"balanced_accuracy": 0.812, "f1_macro": 0.786},
+    "plan": ["profile_dataset", "scenario:large", ...],
+    "reflection_status": "ok",
+    "reflection_history": [...]
+  }
+}
+```
 
-**Meta-learning** goes one step further. After each replan cycle, the orchestrator calls `store_reflection_outcome()` to record which suggestion categories were given, the F1 before the replan, the F1 after, and whether the performance improved. On subsequent runs, `get_suggestion_effectiveness()` returns the historical success rate for each suggestion category. The reflector uses this to downweight suggestions that have previously failed on this dataset — reducing their impact score so they appear lower in the sorted suggestion list and are less likely to drive another failed replan.
+### Retrieval Hierarchy
 
-**Failed strategy detection** is the practical output of meta-learning. If a suggestion category has been tried at least once and never produced meaningful improvement, it is added to the set of failed strategies and a `[Memory]` warning note is added to the reflection output. This ensures the agent does not repeatedly give the same advice that has not worked.
+```
+New dataset arrives
+        │
+        ▼
+Exact fingerprint match? ─── YES ──→ Use prior best model directly
+        │                              (match_type: "exact")
+        NO
+        │
+        ▼
+Similarity score > 0.50? ─── YES ──→ Use as hint, lower confidence
+        │                              (match_type: "similar")
+        NO
+        │
+        ▼
+Plan from scratch (no memory hint)
+```
+
+**Similarity** is computed across four dimensions:
+
+| Dimension | Weight | Why |
+|---|---|---|
+| Size bucket (tiny/small/medium/large) | 30% | Dataset size is the strongest driver of strategy |
+| Number of classes | 25% | Binary vs multi-class changes metric choice |
+| Imbalance ratio (log scale) | 25% | Imbalance handling is a major decision point |
+| Numeric/categorical feature ratio | 20% | Affects preprocessing choices |
+
+### Meta-Learning from Reflection Outcomes
+
+When a replan happens, the orchestrator records the outcome afterwards:
+
+```
+store_reflection_outcome(
+    fingerprint = "fp_123...",
+    suggestions = ["Try ensemble methods", "Apply class_weight='balanced'"],
+    f1_before   = 0.48,
+    f1_after    = 0.61,
+    improved    = True   ← computed as f1_after - f1_before ≥ 0.02
+)
+```
+
+On the next run against the same dataset, the reflector checks `get_suggestion_effectiveness()` which returns the historical success rate per suggestion category (`imbalance`, `ensemble`, `regularisation`, etc.). Suggestions from categories with a 0% success rate have their impact score reduced by 60%, pushing them lower in the sorted suggestion list. A `[Memory]` warning note is added to the reflection output: *"Suggestion category 'ensemble' was tried in a prior replan without meaningful improvement."*
+
+This prevents the agent from endlessly giving the same advice that has not worked.
 
 ---
 
 ## 8. Ethics and Limitations
 
-Several ethical considerations apply to a system that makes autonomous decisions about data and models.
+### Ethical Considerations
 
-**Fairness** is the most significant concern. The agent does not analyse whether features like race, sex, or nationality should be used as inputs. On the Adult Income dataset, for example, `sex`, `race`, and `native_country` are all present as features, and using them in an income prediction model raises clear fairness concerns. The agent will use them because they correlate with the target — it has no mechanism to distinguish between informative and ethically problematic features. Any practical deployment would need a separate fairness audit layer, ideally using tools like Fairlearn or AIF360, that the agent does not currently include.
+**Fairness** is the most significant concern. The agent makes no distinction between features that are technically informative and features that raise ethical concerns. On the Adult Income dataset, `sex`, `race`, and `native_country` are all included as features and the agent will use them because they correlate with income. A deployed system of this type would need a separate fairness audit - for example, checking whether prediction error rates differ systematically across demographic groups.
 
-**Transparency** is well handled by the audit trail the agent produces. Every plan step is justified in plain text, every metric is saved, and the reflection identifies what went wrong and why. A user can always trace why a particular model was chosen and what issues were identified.
+**Transparency** is well handled. Every decision is recorded: the plan with its justification, the reflection with its root cause diagnosis, and the memory with its history. A user can always trace why a model was chosen and what the agent thought about its performance.
 
-**Data quality and bias** can propagate silently. If the training data reflects historical biases (e.g. certain demographic groups were historically denied income opportunities), the model will learn those patterns and the agent will not flag it as a problem. The reflector checks for label noise and class imbalance, but it cannot detect when the imbalance itself is the result of unfair historical processes.
+**Data quality propagation.** If training data reflects historical biases, the model learns those patterns. The reflector checks for label noise and class imbalance, but it cannot detect when imbalance itself results from unfair historical processes.
 
-**Scope limitations** are also important to acknowledge. The system only handles tabular classification problems. It does not support regression, time-series forecasting, text classification, image classification, or multi-label problems. The maximum recommended dataset size for the full model suite (including GradientBoosting) is around 50,000 rows — above this, training becomes slow. There is no support for custom loss functions, hyperparameter search, or external feature sources.
+### Technical Limitations
 
-**Overfitting risk on tiny datasets** is partially mitigated by cross-validation, but the agent cannot guarantee that a model generalising well on a 150-row cross-validation split will generalise in production. The confidence interval output helps communicate this uncertainty, but it cannot eliminate it.
+| Limitation | Detail |
+|---|---|
+| Classification only | No regression, time-series, multi-label, or text classification |
+| No hyperparameter search | Models use default or lightly tuned hyperparameters |
+| No SMOTE / oversampling | Imbalance is handled only via class weights, not synthetic samples |
+| Feature importance blind | The agent does not read tree feature importances to inform re-planning |
+| Scale ceiling (~50k rows for GB) | Above this GradientBoosting is excluded; XGBoost / LightGBM would be better choices |
+| Memory based on fingerprint | Structural renames or column reorders produce a different fingerprint even for the same underlying dataset |
 
 ---
 
 ## 9. Conclusion and Future Work
 
-This project demonstrates that a rule-based agentic system without any large language model can perform genuine autonomous reasoning about data. By profiling datasets, detecting scenarios, forming conditional plans, reflecting on results, and updating its behaviour based on what it has learned, the agent exhibits the kind of adaptability that distinguishes an intelligent system from a fixed script.
+### What Was Built
 
-The four test datasets show this diversity in action. The Iris dataset (150 rows, balanced, clean) triggers cross-validation and simple preprocessing. The Titanic dataset (mixed types, missing values) triggers imputation and categorical encoding. The Sales dataset (30,000 rows, 21 classes, datetime and high-cardinality columns) triggers the most complex preparation pipeline. The Adult Income dataset (49,000 rows, imbalanced, high-cardinality categoricals, skewed features) triggers large-scale mode with balanced class weighting and ordinal encoding.
+This project demonstrates that a rule-based agentic system can perform genuine autonomous reasoning about data without any large language model. The key design principle throughout was: **every agent decision must be traceable to a specific data signal.** The plan is not a hard-coded checklist - it is assembled from what the profiler actually finds.
 
-The most important design decision made throughout this project is that every agent decision should be traceable to a specific data signal. The plan is not a hard-coded checklist — it is assembled dynamically from what the profiler finds. This is what makes the system genuinely agentic rather than just a well-structured script.
+The four test datasets show this in practice. Iris gets cross-validation. Sales.csv gets datetime extraction, identifier removal, and ordinal encoding. Adult Income gets balanced class weighting, skew transformation, and ordinal encoding for high-cardinality categoricals. No two datasets trigger the same plan, which is the evidence for genuine adaptability.
 
-Several directions would strengthen the system in future work. First, **hyperparameter tuning** using Bayesian optimisation or random search would likely improve performance across all datasets without requiring manual configuration. Second, **fairness analysis** checking whether predictions differ systematically across demographic groups would make the system more responsible. Third, **feature importance feedback** from tree-based models could be passed back into the reflector to identify which features are carrying most of the signal and which are noise. Fourth, extending the system to **regression and multi-label classification** would broaden its applicability. Finally, incorporating **data drift detection** would let the system flag when a new dataset is statistically very different from anything in memory, so the agent knows its prior experience may not be reliable.
+### What Worked Well
 
-The core principle throughout has been that high marks in this assignment come from how the system reasons, not from maximising accuracy. The goal was to build an agent that makes defensible, data-driven decisions and can explain them — and that is what has been built.
+- **Plan explainability** - every task has a plain-English justification saved to disk
+- **Root cause diagnosis** - synthesising multiple checks into a single label makes the agent's reasoning clear
+- **Graceful error handling** - unknown column types, continuous targets, empty datasets, and training failures all produce user-friendly messages rather than Python tracebacks
+- **Memory similarity matching** - the four-dimension similarity score meaningfully captures dataset relatedness
 
----
+### Future Work
+
+| Direction | What it would add |
+|---|---|
+| Hyperparameter search (Bayesian) | Better performance without manual tuning |
+| Fairness auditing (Fairlearn) | Demographic parity and equal opportunity checks |
+| SMOTE / ADASYN oversampling | Alternative to class weighting for severe imbalance |
+| Feature importance feedback | Tree importances fed back into reflector for better root cause analysis |
+| XGBoost / LightGBM support | Better scaling beyond 50k rows |
+| Regression and multi-label support | Broader applicability |
+| Data drift detection | Flag when a new dataset is statistically unlike anything in memory |
+
+
