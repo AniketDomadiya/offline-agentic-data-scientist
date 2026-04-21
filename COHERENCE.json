@@ -1,0 +1,124 @@
+{
+    "project_title": "CE888 Offline Agentic Data Scientist",
+    "registration_number": "2501463",
+    "author": "Aniket Ashokbhai Domadiya",
+    "date": "2026-04-21",
+    "short_description": "An offline agentic pipeline that profiles classification datasets, generates a conditional plan, trains candidate models, evaluates and reflects to propose replans. Designed for deterministic rule-based reasoning and meta-learning via a JSON-backed memory.",
+    "demo_files": {
+        "demo_video": "demo.mp4",
+        "slides": "slides.pdf"
+    },
+    "run_command": "python run_agent.py --data example_dataset.csv --target auto --output outputs/demo_run",
+    "required_env": {
+        "python_version": "3.10+ (tested on 3.12)",
+        "pip_requirements_file": "requirements.txt"
+    },
+    "datasets_used": [
+        "data/AdultIncome.csv",
+        "data/Titanic.csv",
+        "data/Sales.csv",
+        "data/Iris.csv",
+        "data/example_dataset.csv",
+        "data/demo.csv"
+    ],
+    "expected_outputs": [
+        "outputs/<timestamp>/report.md",
+        "outputs/<timestamp>/eda_summary.json",
+        "outputs/<timestamp>/plan.json",
+        "outputs/<timestamp>/metrics.json",
+        "outputs/<timestamp>/reflection.json",
+        "outputs/<timestamp>/confusion_matrix.png"
+    ],
+    "key_claims": [
+        {
+            "claim_id": "C1",
+            "claim_short": "Agent profiles dataset and detects scenario signals",
+            "evidence_code": [
+                "tools/data_profiler.py::profile_dataset",
+                "agents/planner.py::_detect_scenario",
+                "agents/planner.py::create_plan"
+            ],
+            "evidence_tests": [
+                "tests/test_data_profiler.py::test_profile_dataset_basic",
+                "tests/test_planner.py::test_detect_scenarios_and_base_plan"
+            ],
+            "evidence_outputs": [
+                "outputs/<timestamp>/eda_summary.json",
+                "outputs/<timestamp>/plan.json"
+            ],
+            "why_it_proves": "profile_dataset produces a structured profile consumed by create_plan which emits a scenario-tagged plan; unit tests verify expected scenario selection."
+        },
+        {
+            "claim_id": "C2",
+            "claim_short": "Agent trains and selects best model and computes evaluation artefacts",
+            "evidence_code": [
+                "tools/modelling.py::train_models",
+                "tools/evaluation.py::evaluate_best"
+            ],
+            "evidence_tests": [
+                "tests/test_evaluation_and_modelling.py::test_build_preprocessor_and_train",
+                "tests/test_evaluation_and_modelling.py::test_evaluate_plot_and_json_safe"
+            ],
+            "evidence_outputs": [
+                "outputs/<timestamp>/metrics.json",
+                "outputs/<timestamp>/confusion_matrix.png"
+            ],
+            "why_it_proves": "train_models returns best/all metrics; evaluate_best creates confusion matrix and report strings; tests exercise both functions end-to-end on a small dataset."
+        },
+        {
+            "claim_id": "C3",
+            "claim_short": "Agent reflects, diagnoses root causes and recommends replans",
+            "evidence_code": [
+                "agents/reflector.py::reflect",
+                "agents/reflector.py::apply_replan_strategy",
+                "agents/planner.py::create_replan"
+            ],
+            "evidence_tests": [
+                "tests/test_reflector.py::test_reflect_and_should_replan",
+                "tests/test_reflector.py::test_apply_replan_strategy_basic",
+                "tests/test_planner.py::test_inject_signal_tasks_and_replanning"
+            ],
+            "evidence_outputs": [
+                "outputs/<timestamp>/reflection.json",
+                "outputs/<timestamp>/plan.json (replan attempts reflected)"
+            ],
+            "why_it_proves": "reflect synthesises statistics and model metrics to produce structured reflection with root_cause and replan_recommended; tests cover core reflection heuristics and replan application."
+        },
+        {
+            "claim_id": "C4",
+            "claim_short": "Agent learns meta-learning signals in persistent memory",
+            "evidence_code": [
+                "agents/memory.py::JSONMemory::store_reflection_outcome",
+                "agents/memory.py::JSONMemory::get_suggestion_effectiveness",
+                "agents/planner.py::_inject_signal_tasks (uses memory hint)"
+            ],
+            "evidence_tests": [
+                "tests/test_memory.py::test_memory_basic",
+                "tests/test_memory.py::test_similarity_and_hints",
+                "tests/test_planner.py::test_inject_signal_tasks_and_replanning"
+            ],
+            "evidence_outputs": [
+                "agent_memory.json (or test temporary memory files)",
+                "memory notes in outputs/<timestamp>/reflection.json"
+            ],
+            "why_it_proves": "JSONMemory persists reflection history and returns hints/effectiveness used by planner and reflector; tests validate storage and hint retrieval."
+        }
+    ],
+    "tests_and_coverage": {
+        "run_tests_cmd": "pytest",
+        "coverage_cmd": "pytest --cov=agents --cov=tools --cov-report=term-missing",
+        "coverage_percent": "68%"
+    },
+    "limitations_and_known_issues": [
+        "No LLMs used; decision logic is rule-based and may not handle entirely novel failure modes.",
+        "Windows console encoding can expose unicode print issues (workaround applied in log()).",
+        "Some heavy training options (large datasets) are disabled/guarded in code; tests use small synthetic data."
+    ],
+    "reproducibility_notes": {
+        "random_seed": 42,
+        "deterministic_flags": "model random_state set where applicable; training may still be non-deterministic across platforms for some estimators",
+        "expected_runtime": "A few minutes for demo; tests run in ~1 minute locally"
+    },
+    "license": "MIT",
+    "notes": "This COHERENCE.json maps claims to concrete evidence in the repository so an assessor can quickly verify reasoning vs implementation. Update registration_number and coverage_percent before submission."
+}
